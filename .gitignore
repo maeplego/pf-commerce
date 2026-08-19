@@ -9,6 +9,12 @@ vendor/
 node_modules/
 .next/
 
+# Playwright
+/test-results/
+/playwright-report/
+apps/storefront/test-results/
+apps/storefront/playwright-report/
+
 # Secrets
 .env
 .env.*

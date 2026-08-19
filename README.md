@@ -47,4 +47,18 @@ cd apps/bff
 npm test
 ```
 
+`/demo` のブラウザ確認は Compose 起動後だけ（既定 CI では動かない）:
+
+```powershell
+cd apps/storefront
+npx playwright install chromium
+npx playwright test
+```
+
+Compose 起動後のヘルス:
+
+```powershell
+node scripts/compose-smoke.mjs http://localhost:8099/health http://localhost:8110/health
+```
+
 設計の詳細は [portfolio-plan](https://github.com/maeplego/portfolio-plan) の `portfolio-plan/commerce-platform/docs/` です。

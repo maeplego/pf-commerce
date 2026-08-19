@@ -1,0 +1,19 @@
+# /demo needs Compose (catalog/inventory/order). Not on push.
+# Local: docker compose -f deploy/compose.yaml up -d --build
+#        then apps/storefront npm run test:e2e
+name: e2e
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  playwright:
+    runs-on: ubuntu-latest
+    # Hosted CI does not start the commerce stack (multi-image build).
+    if: false
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "run locally after compose; see README and portfolio-plan/ci.md"
