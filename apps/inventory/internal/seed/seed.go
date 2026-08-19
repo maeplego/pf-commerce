@@ -53,7 +53,7 @@ type product struct {
 func waitProducts(ctx context.Context, catalogURL string) ([]product, error) {
 	client := &http.Client{Timeout: 5 * time.Second}
 	var last error
-	for i := 0; i < 40; i++ {
+	for i := 0; i < 90; i++ {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, catalogURL+"/v1/products", nil)
 		if err != nil {
 			return nil, err
@@ -61,7 +61,7 @@ func waitProducts(ctx context.Context, catalogURL string) ([]product, error) {
 		res, err := client.Do(req)
 		if err != nil {
 			last = err
-			time.Sleep(250 * time.Millisecond)
+			time.Sleep(time.Second)
 			continue
 		}
 		var body struct {
@@ -71,7 +71,7 @@ func waitProducts(ctx context.Context, catalogURL string) ([]product, error) {
 		_ = res.Body.Close()
 		if decErr != nil || res.StatusCode != 200 || len(body.Products) == 0 {
 			last = fmt.Errorf("catalog not ready status=%d", res.StatusCode)
-			time.Sleep(250 * time.Millisecond)
+			time.Sleep(time.Second)
 			continue
 		}
 		return body.Products, nil

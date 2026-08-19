@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: catalog
+  labels:
+    app: commerce-catalog
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: commerce-catalog
+  template:
+    metadata:
+      labels:
+        app: commerce-catalog
+    spec:
+      containers:
+        - name: catalog
+          image: pf-commerce-catalog:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8101
+              name: http
+          env:
+            - name: COMMERCE_HTTP_PORT
+              value: "8101"
+            - name: COMMERCE_DATABASE_URL
+              value: postgres://commerce_catalog:dev-commerce-catalog@postgres.platform.svc.cluster.local:5432/commerce_catalog?sslmode=disable
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: http://otel-collector.platform.svc.cluster.local:4318
+            - name: OTEL_SERVICE_NAME
+              value: commerce-catalog
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8101
+            initialDelaySeconds: 8
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8101
+            initialDelaySeconds: 15
+            periodSeconds: 10

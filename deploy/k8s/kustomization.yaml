@@ -1,0 +1,21 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: p06
+
+resources:
+  - deployment-catalog.yaml
+  - deployment-inventory.yaml
+  - deployment-order.yaml
+  - deployment-api.yaml
+  - deployment-web.yaml
+  - service-catalog.yaml
+  - service-inventory.yaml
+  - service-order.yaml
+  - service-api.yaml
+  - service-web.yaml
+
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: portfolio-integration
+    includeSelectors: false

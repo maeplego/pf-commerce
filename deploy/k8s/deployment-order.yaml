@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order
+  labels:
+    app: commerce-order
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: commerce-order
+  template:
+    metadata:
+      labels:
+        app: commerce-order
+    spec:
+      containers:
+        - name: order
+          image: pf-commerce-order:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8103
+              name: http
+          env:
+            - name: COMMERCE_HTTP_PORT
+              value: "8103"
+            - name: COMMERCE_DEV_AUTH
+              value: "true"
+            - name: COMMERCE_DATABASE_URL
+              value: postgres://commerce_order:dev-commerce-order@postgres.platform.svc.cluster.local:5432/commerce_order?sslmode=disable
+            - name: COMMERCE_CATALOG_URL
+              value: http://catalog.p06.svc.cluster.local:8101
+            - name: COMMERCE_INVENTORY_URL
+              value: http://inventory.p06.svc.cluster.local:8102
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: http://otel-collector.platform.svc.cluster.local:4318
+            - name: OTEL_SERVICE_NAME
+              value: commerce-order
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8103
+            initialDelaySeconds: 12
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8103
+            initialDelaySeconds: 20
+            periodSeconds: 10

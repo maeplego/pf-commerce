@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: order
+  labels:
+    app: commerce-order
+spec:
+  selector:
+    app: commerce-order
+  ports:
+    - name: http
+      port: 8103
+      targetPort: 8103

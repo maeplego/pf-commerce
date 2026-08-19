@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+  labels:
+    app: commerce-web
+spec:
+  selector:
+    app: commerce-web
+  ports:
+    - name: http
+      port: 3009
+      targetPort: 3009

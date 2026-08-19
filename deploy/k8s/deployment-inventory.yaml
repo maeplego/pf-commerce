@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inventory
+  labels:
+    app: commerce-inventory
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: commerce-inventory
+  template:
+    metadata:
+      labels:
+        app: commerce-inventory
+    spec:
+      containers:
+        - name: inventory
+          image: pf-commerce-inventory:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8102
+              name: http
+          env:
+            - name: COMMERCE_HTTP_PORT
+              value: "8102"
+            - name: COMMERCE_DATABASE_URL
+              value: postgres://commerce_inventory:dev-commerce-inventory@postgres.platform.svc.cluster.local:5432/commerce_inventory?sslmode=disable
+            - name: COMMERCE_CATALOG_URL
+              value: http://catalog.p06.svc.cluster.local:8101
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: http://otel-collector.platform.svc.cluster.local:4318
+            - name: OTEL_SERVICE_NAME
+              value: commerce-inventory
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8102
+            initialDelaySeconds: 20
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8102
+            initialDelaySeconds: 30
+            periodSeconds: 10
