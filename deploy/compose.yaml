@@ -16,6 +16,18 @@ services:
       - commerce-pg:/var/lib/postgresql/data
       - ./init-db.sql:/docker-entrypoint-initdb.d/01-databases.sql:ro
 
+  commerce-db-init:
+    image: postgres:16-alpine
+    depends_on:
+      commerce-db:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: commerce
+    volumes:
+      - ./ensure-databases.sh:/ensure-databases.sh:ro
+    entrypoint: ["sh", "/ensure-databases.sh"]
+    restart: "no"
+
   commerce-catalog:
     build:
       context: ..
@@ -24,8 +36,8 @@ services:
       COMMERCE_HTTP_PORT: "8101"
       COMMERCE_DATABASE_URL: postgres://commerce:commerce@commerce-db:5432/catalog?sslmode=disable
     depends_on:
-      commerce-db:
-        condition: service_healthy
+      commerce-db-init:
+        condition: service_completed_successfully
 
   commerce-inventory:
     build:
@@ -36,8 +48,8 @@ services:
       COMMERCE_DATABASE_URL: postgres://commerce:commerce@commerce-db:5432/inventory?sslmode=disable
       COMMERCE_CATALOG_URL: http://commerce-catalog:8101
     depends_on:
-      commerce-db:
-        condition: service_healthy
+      commerce-db-init:
+        condition: service_completed_successfully
       commerce-catalog:
         condition: service_started
 
@@ -54,8 +66,8 @@ services:
       COMMERCE_PAYMENT_URL: http://commerce-payment:8104
       COMMERCE_NOTIFY_URL: http://commerce-notify:8105
     depends_on:
-      commerce-db:
-        condition: service_healthy
+      commerce-db-init:
+        condition: service_completed_successfully
       commerce-catalog:
         condition: service_started
       commerce-inventory:
@@ -110,8 +122,8 @@ services:
     ports:
       - "8099:8099"
     depends_on:
-      commerce-db:
-        condition: service_healthy
+      commerce-db-init:
+        condition: service_completed_successfully
       commerce-catalog:
         condition: service_started
       commerce-inventory:
