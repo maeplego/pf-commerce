@@ -2,7 +2,6 @@ package web_test
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -11,35 +10,46 @@ import (
 	"testing"
 	"time"
 
-	"github.com/portfolio/pf-commerce/api/internal/auth"
-	"github.com/portfolio/pf-commerce/api/internal/cart"
-	"github.com/portfolio/pf-commerce/api/internal/catalog"
-	"github.com/portfolio/pf-commerce/api/internal/clock"
-	"github.com/portfolio/pf-commerce/api/internal/id"
-	"github.com/portfolio/pf-commerce/api/internal/inventory"
-	"github.com/portfolio/pf-commerce/api/internal/order"
-	"github.com/portfolio/pf-commerce/api/internal/payment"
-	"github.com/portfolio/pf-commerce/api/internal/seed"
-	"github.com/portfolio/pf-commerce/api/internal/store/memory"
-	"github.com/portfolio/pf-commerce/api/internal/web"
+	gwcart "github.com/portfolio/pf-commerce/apps/api/internal/cart"
+	gwclients "github.com/portfolio/pf-commerce/apps/api/internal/clients"
+	gwmem "github.com/portfolio/pf-commerce/apps/api/internal/store/memory"
+	"github.com/portfolio/pf-commerce/apps/api/internal/web"
+	catboot "github.com/portfolio/pf-commerce/apps/catalog/boot"
+	invboot "github.com/portfolio/pf-commerce/apps/inventory/boot"
+	ordboot "github.com/portfolio/pf-commerce/apps/order/boot"
+	"github.com/portfolio/pf-commerce/packages/auth"
+	"github.com/portfolio/pf-commerce/packages/clock"
+	"github.com/portfolio/pf-commerce/packages/id"
 )
 
 func testServer(t *testing.T) *httptest.Server {
 	t.Helper()
-	ctx := context.Background()
-	st := memory.New()
 	clk := &clock.Fixed{T: time.Date(2026, 8, 19, 4, 0, 0, 0, time.UTC)}
-	cat := catalog.NewService(memory.Catalog{Store: st}, clk.Now)
-	inv := inventory.NewService(memory.Inventory{Store: st}, 15*time.Minute, clk.Now)
-	carts := cart.NewService(memory.Cart{Store: st}, clk.Now)
-	orders := order.NewService(memory.Orders{Store: st}, cat, inv, carts, payment.NewMock(), clk.Now)
-	site, err := seed.Ensure(ctx, cat, inv)
+
+	catH, err := catboot.MemoryHandler(clk.Now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	mw := auth.New(true)
-	srv := web.New(cat, inv, carts, orders, site.ID, "", mw, nil)
-	return httptest.NewServer(srv.Routes())
+	catHTTP := httptest.NewServer(catH)
+
+	invH, siteID, err := invboot.MemoryHandler(clk.Now, catHTTP.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	invHTTP := httptest.NewServer(invH)
+
+	ordHTTP := httptest.NewServer(ordboot.MemoryHandler(clk.Now, catHTTP.URL, invHTTP.URL, siteID))
+
+	be := gwclients.New(catHTTP.URL, invHTTP.URL, ordHTTP.URL)
+	gw := web.New(be, gwcart.NewService(gwmem.New(), clk.Now), siteID, "", auth.New(true), nil)
+	ts := httptest.NewServer(gw.Routes())
+	t.Cleanup(func() {
+		ts.Close()
+		ordHTTP.Close()
+		invHTTP.Close()
+		catHTTP.Close()
+	})
+	return ts
 }
 
 func doJSON(t *testing.T, method, url string, body any, sub, role string) *http.Response {
@@ -100,7 +110,6 @@ func mugID(t *testing.T, ts *httptest.Server) string {
 
 func TestHealthReady(t *testing.T) {
 	ts := testServer(t)
-	defer ts.Close()
 	for _, path := range []string{"/health", "/ready"} {
 		res, err := http.Get(ts.URL + path)
 		if err != nil {
@@ -115,7 +124,6 @@ func TestHealthReady(t *testing.T) {
 
 func TestListProductsPublic(t *testing.T) {
 	ts := testServer(t)
-	defer ts.Close()
 	res, err := http.Get(ts.URL + "/v1/products")
 	if err != nil {
 		t.Fatal(err)
@@ -150,7 +158,6 @@ func TestListProductsPublic(t *testing.T) {
 
 func TestCheckoutUnauthorized(t *testing.T) {
 	ts := testServer(t)
-	defer ts.Close()
 	res := doJSON(t, http.MethodPost, ts.URL+"/v1/checkout", map[string]any{"idempotencyKey": id.New()}, "", "")
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusUnauthorized {
@@ -160,7 +167,6 @@ func TestCheckoutUnauthorized(t *testing.T) {
 
 func TestCheckoutPaidAndIdempotent(t *testing.T) {
 	ts := testServer(t)
-	defer ts.Close()
 	pid := mugID(t, ts)
 	key := id.New()
 	body := map[string]any{
@@ -197,7 +203,6 @@ func TestCheckoutPaidAndIdempotent(t *testing.T) {
 
 func TestCheckoutShortageHTTP(t *testing.T) {
 	ts := testServer(t)
-	defer ts.Close()
 	pid := mugID(t, ts)
 	res := doJSON(t, http.MethodPost, ts.URL+"/v1/checkout", map[string]any{
 		"idempotencyKey": id.New(),
@@ -235,7 +240,6 @@ func TestCheckoutShortageHTTP(t *testing.T) {
 
 func TestConcurrentCheckoutHTTP(t *testing.T) {
 	ts := testServer(t)
-	defer ts.Close()
 	pid := mugID(t, ts)
 	codes := make(chan int, 2)
 	var wg sync.WaitGroup
@@ -272,7 +276,6 @@ func TestConcurrentCheckoutHTTP(t *testing.T) {
 
 func TestOpsInboundForbiddenToBuyer(t *testing.T) {
 	ts := testServer(t)
-	defer ts.Close()
 	res := doJSON(t, http.MethodPost, ts.URL+"/v1/ops/stock-inbound", map[string]any{
 		"productId": mugID(t, ts), "qty": 1,
 	}, "alice", "buyer")
@@ -284,7 +287,6 @@ func TestOpsInboundForbiddenToBuyer(t *testing.T) {
 
 func TestRejectFloatPriceOnOpsCreate(t *testing.T) {
 	ts := testServer(t)
-	defer ts.Close()
 	raw := bytes.NewBufferString(`{"sku":"BAD-1","name":"Bad","priceMinor":12.5,"currency":"JPY"}`)
 	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/v1/ops/products", raw)
 	req.Header.Set("Content-Type", "application/json")
@@ -302,7 +304,6 @@ func TestRejectFloatPriceOnOpsCreate(t *testing.T) {
 
 func TestOtherBuyerForbidden(t *testing.T) {
 	ts := testServer(t)
-	defer ts.Close()
 	pid := mugID(t, ts)
 	res := doJSON(t, http.MethodPost, ts.URL+"/v1/checkout", map[string]any{
 		"idempotencyKey": id.New(),
@@ -316,5 +317,37 @@ func TestOtherBuyerForbidden(t *testing.T) {
 	defer res2.Body.Close()
 	if res2.StatusCode != http.StatusForbidden {
 		t.Fatalf("%d", res2.StatusCode)
+	}
+}
+
+func TestCheckoutFromCart(t *testing.T) {
+	ts := testServer(t)
+	pid := mugID(t, ts)
+	res := doJSON(t, http.MethodPost, ts.URL+"/v1/cart/items", map[string]any{"productId": pid, "qty": 1}, "alice", "buyer")
+	if res.StatusCode != 200 {
+		b, _ := io.ReadAll(res.Body)
+		t.Fatalf("cart %d %s", res.StatusCode, b)
+	}
+	_ = res.Body.Close()
+	res2 := doJSON(t, http.MethodPost, ts.URL+"/v1/checkout", map[string]any{"idempotencyKey": id.New()}, "alice", "buyer")
+	if res2.StatusCode != http.StatusCreated {
+		b, _ := io.ReadAll(res2.Body)
+		t.Fatalf("checkout %d %s", res2.StatusCode, b)
+	}
+	var o struct {
+		Status      string `json:"status"`
+		AmountMinor int64  `json:"amountMinor"`
+	}
+	decode(t, res2, &o)
+	if o.Status != "paid" || o.AmountMinor != 1200 {
+		t.Fatalf("%+v", o)
+	}
+	res3 := doJSON(t, http.MethodGet, ts.URL+"/v1/cart", nil, "alice", "buyer")
+	var c struct {
+		Items []any `json:"items"`
+	}
+	decode(t, res3, &c)
+	if len(c.Items) != 0 {
+		t.Fatalf("cart should clear: %+v", c)
 	}
 }

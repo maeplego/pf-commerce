@@ -5,12 +5,10 @@ import (
 	"errors"
 	"time"
 
-	"github.com/portfolio/pf-commerce/api/internal/id"
+	"github.com/portfolio/pf-commerce/packages/id"
 )
 
-var (
-	ErrInvalid = errors.New("invalid cart")
-)
+var ErrInvalid = errors.New("invalid cart")
 
 type Item struct {
 	ProductID string

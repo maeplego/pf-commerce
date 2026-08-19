@@ -14,21 +14,74 @@ services:
       retries: 10
     volumes:
       - commerce-pg:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/01-databases.sql:ro
+
+  commerce-catalog:
+    build:
+      context: ..
+      dockerfile: apps/catalog/Dockerfile
+    environment:
+      COMMERCE_HTTP_PORT: "8101"
+      COMMERCE_DATABASE_URL: postgres://commerce:commerce@commerce-db:5432/catalog?sslmode=disable
+    depends_on:
+      commerce-db:
+        condition: service_healthy
+
+  commerce-inventory:
+    build:
+      context: ..
+      dockerfile: apps/inventory/Dockerfile
+    environment:
+      COMMERCE_HTTP_PORT: "8102"
+      COMMERCE_DATABASE_URL: postgres://commerce:commerce@commerce-db:5432/inventory?sslmode=disable
+      COMMERCE_CATALOG_URL: http://commerce-catalog:8101
+    depends_on:
+      commerce-db:
+        condition: service_healthy
+      commerce-catalog:
+        condition: service_started
+
+  commerce-order:
+    build:
+      context: ..
+      dockerfile: apps/order/Dockerfile
+    environment:
+      COMMERCE_HTTP_PORT: "8103"
+      COMMERCE_DEV_AUTH: ${COMMERCE_DEV_AUTH:-true}
+      COMMERCE_DATABASE_URL: postgres://commerce:commerce@commerce-db:5432/orders?sslmode=disable
+      COMMERCE_CATALOG_URL: http://commerce-catalog:8101
+      COMMERCE_INVENTORY_URL: http://commerce-inventory:8102
+    depends_on:
+      commerce-db:
+        condition: service_healthy
+      commerce-catalog:
+        condition: service_started
+      commerce-inventory:
+        condition: service_started
 
   commerce-api:
     build:
-      context: ../apps/api
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: apps/api/Dockerfile
     environment:
       COMMERCE_HTTP_PORT: "8099"
       COMMERCE_DEV_AUTH: ${COMMERCE_DEV_AUTH:-true}
       COMMERCE_CORS_ORIGIN: ${COMMERCE_CORS_ORIGIN:-http://localhost:3009}
-      COMMERCE_DATABASE_URL: ${COMMERCE_DATABASE_URL:-postgres://commerce:commerce@commerce-db:5432/commerce?sslmode=disable}
+      COMMERCE_DATABASE_URL: postgres://commerce:commerce@commerce-db:5432/gateway?sslmode=disable
+      COMMERCE_CATALOG_URL: http://commerce-catalog:8101
+      COMMERCE_INVENTORY_URL: http://commerce-inventory:8102
+      COMMERCE_ORDER_URL: http://commerce-order:8103
     ports:
       - "8099:8099"
     depends_on:
       commerce-db:
         condition: service_healthy
+      commerce-catalog:
+        condition: service_started
+      commerce-inventory:
+        condition: service_started
+      commerce-order:
+        condition: service_started
 
   commerce-storefront:
     build:

@@ -2,17 +2,22 @@
 
 P06 commerce-platform の製品リポジトリです。**学習用であり、本番 EC / 決済基盤の置き換えではありません。** 本物のカード番号は扱いません。
 
-いまは **モジュラモノリス** です。カタログ・在庫・注文はプロセス内のモジュールで、DB は 1 つ（テーブル接頭辞で境界）。最初から 8 サービスに切ると、注文フローの正しさより配線が先に壊れます。分割は Compose で購入〜在庫不足が安定してからにします。
+スライス 2 は **同一リポジトリのプロセス分割** です。8 個の git リポジトリにはしていません。公開入口は gateway（`apps/api`）。storefront は従来どおり `http://localhost:8099` だけを見ます。K8s / overlay D はまだ出しません。
 
 ## 構成
 
-| パス | 役割 |
-| --- | --- |
-| `apps/api` | Go API。catalog / inventory / cart / order（決済モックは order 内） |
-| `apps/storefront` | Next.js。カタログと在庫 1 の同時購入デモ |
-| `deploy/` | 単体 Compose（Postgres + API + storefront） |
+| パス | 役割 | Compose サービス |
+| --- | --- | --- |
+| `apps/catalog` | 商品マスタ | `commerce-catalog` |
+| `apps/inventory` | 在庫・引当（UPDATE と reservation を 1 TX） | `commerce-inventory` |
+| `apps/order` | チェックアウト。決済は order 内モック | `commerce-order` |
+| `apps/api` | 公開 gateway。カートと商品+在庫の集約 | `commerce-api` |
+| `apps/storefront` | Next.js | `commerce-storefront` |
+| `deploy/` | Postgres 1 台 + 4 DB（catalog / inventory / orders / gateway） | |
 
-K8s / overlay D、RabbitMQ、GraphQL BFF、注文のイベントストア化は **未着手**。商品画像は URL 文字列（P03 未接続）。認証は `X-Dev-User-Sub`（P01 OIDC は未配線）。
+共有は `packages/` の薄いもの（整数金額、ULID、dev auth、JSON）だけです。注文フローの正しさはプロセス間 HTTP でも、公開契約（在庫 1 → 201 と 409）は変えていません。
+
+K8s / overlay D、RabbitMQ、GraphQL BFF、注文のイベントストア化は **未着手**。商品画像は URL 文字列。認証は `X-Dev-User-Sub`。
 
 ## 単体デモ
 
@@ -22,12 +27,16 @@ copy .env.example .env
 docker compose up -d --build
 ```
 
+以前モノリス用の volume があるときは `docker compose down -v` してから上げてください（init で DB を分けるため）。
+
 | URL | 用途 |
 | --- | --- |
 | http://localhost:3009 | ストアフロント |
 | http://localhost:3009/demo | 在庫 1 を buyer-a / buyer-b が同時購入 |
-| http://localhost:8099/health | API liveness |
-| http://localhost:8099/ready | API readiness（Postgres ping） |
+| http://localhost:8099/health | gateway liveness |
+| http://localhost:8099/ready | gateway + catalog/inventory/order |
+
+catalog / inventory / order のポートは Compose ネットワーク内のみ（公開しない）。
 
 シード: `MUG-1` 在庫 1、`TEE-1` 在庫 20、`STK-1` 在庫 0。金額は整数円。
 
@@ -36,8 +45,6 @@ docker compose up -d --build
 1. `/demo` を開く
 2. 左右の「MUG-1 を 1点買う」をほぼ同時に押す
 3. 片方 `paid`、もう片方 `inventory_shortage`（引当を戻す）
-
-API だけなら:
 
 ```powershell
 curl http://localhost:8099/v1/products
@@ -49,18 +56,17 @@ curl -H "X-Dev-User-Sub: buyer-a" -H "Content-Type: application/json" `
 ## テスト
 
 ```powershell
-cd apps/api
+cd <repo root>
 go test ./...
 ```
 
-メモリ実装。Postgres が必要な integration テストはこのスライスには無い（不足の契約は `TryReserve` の原子更新と同じ）。
+メモリ Store + httptest。gateway の HTTP テストは catalog / inventory / order を別 httptest サーバとして繋ぐ。
 
 ## 既知の制限
 
-- サービス抽出前。共有ライブラリはまだ薄い（このリポジトリ内のモジュール）
-- チェックアウトの引当行 insert は残高 UPDATE の次ステートメント（抽出時に 1 TX へ）
-- 予約 TTL 切れは次の Reserve 時に回収。専用ワーカーなし
-- 決済は常に成功するモック（テストだけ失敗を注入）
+- まだ 8 サービス / 8 リポジトリではない。cart は gateway、決済は order 内モック
+- overlay D / K8s は Compose の購入〜不足が安定してから
+- 予約 TTL 切れは次の Reserve 時に回収
 - ops-web / GraphQL / 出荷 / メール / 推薦スロットなし
 
 設計: `project/portfolio-plan/commerce-platform/DESIGN.md`  

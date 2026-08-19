@@ -1,77 +1,47 @@
 package web
 
 import (
+	"bytes"
 	"encoding/json"
-	"errors"
+	"io"
 	"net/http"
-	"strings"
 
-	"github.com/portfolio/pf-commerce/api/internal/auth"
-	"github.com/portfolio/pf-commerce/api/internal/cart"
-	"github.com/portfolio/pf-commerce/api/internal/catalog"
-	"github.com/portfolio/pf-commerce/api/internal/inventory"
-	"github.com/portfolio/pf-commerce/api/internal/money"
-	"github.com/portfolio/pf-commerce/api/internal/order"
-	"github.com/portfolio/pf-commerce/api/internal/payment"
+	"github.com/portfolio/pf-commerce/apps/api/internal/cart"
+	"github.com/portfolio/pf-commerce/apps/api/internal/clients"
+	"github.com/portfolio/pf-commerce/packages/auth"
+	"github.com/portfolio/pf-commerce/packages/httpjson"
 )
 
 type Server struct {
-	cat    *catalog.Service
-	inv    *inventory.Service
+	be     *clients.HTTP
 	carts  *cart.Service
-	orders *order.Service
 	siteID string
 	cors   string
 	auth   *auth.Middleware
 	ready  func() error
 }
 
-func New(cat *catalog.Service, inv *inventory.Service, carts *cart.Service, orders *order.Service, siteID, cors string, mw *auth.Middleware, ready func() error) *Server {
+func New(be *clients.HTTP, carts *cart.Service, siteID, cors string, mw *auth.Middleware, ready func() error) *Server {
 	if ready == nil {
 		ready = func() error { return nil }
 	}
-	return &Server{cat: cat, inv: inv, carts: carts, orders: orders, siteID: siteID, cors: cors, auth: mw, ready: ready}
+	return &Server{be: be, carts: carts, siteID: siteID, cors: cors, auth: mw, ready: ready}
 }
 
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
-	})
-	mux.HandleFunc("GET /ready", func(w http.ResponseWriter, _ *http.Request) {
-		if err := s.ready(); err != nil {
-			writeError(w, http.StatusServiceUnavailable, "not_ready", err.Error())
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
-	})
+	httpjson.MountHealth(mux, s.ready)
 	mux.HandleFunc("GET /v1/products", s.listProducts)
 	mux.HandleFunc("GET /v1/products/{id}", s.getProduct)
-
 	mux.Handle("GET /v1/cart", s.auth.Handler(http.HandlerFunc(s.getCart)))
 	mux.Handle("POST /v1/cart/items", s.auth.Handler(http.HandlerFunc(s.addCartItem)))
 	mux.Handle("PUT /v1/cart", s.auth.Handler(http.HandlerFunc(s.replaceCart)))
 	mux.Handle("POST /v1/checkout", s.auth.Handler(http.HandlerFunc(s.checkout)))
-	mux.Handle("GET /v1/orders", s.auth.Handler(http.HandlerFunc(s.listOrders)))
-	mux.Handle("GET /v1/orders/{id}", s.auth.Handler(http.HandlerFunc(s.getOrder)))
+	mux.Handle("GET /v1/orders", s.auth.Handler(http.HandlerFunc(s.proxyOrderGET)))
+	mux.Handle("GET /v1/orders/{id}", s.auth.Handler(http.HandlerFunc(s.proxyOrderGET)))
 	mux.Handle("POST /v1/ops/products", s.auth.Handler(http.HandlerFunc(s.opsCreateProduct)))
 	mux.Handle("POST /v1/ops/stock-inbound", s.auth.Handler(http.HandlerFunc(s.opsInbound)))
-	return s.withCORS(mux)
-}
-
-func (s *Server) withCORS(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s.cors != "" {
-			w.Header().Set("Access-Control-Allow-Origin", s.cors)
-			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Idempotency-Key, X-Dev-User-Sub, X-Dev-Role")
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
-		}
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
+	return httpjson.CORS(s.cors, mux)
 }
 
 type productJSON struct {
@@ -86,45 +56,66 @@ type productJSON struct {
 	AvailableQty int    `json:"availableQty"`
 }
 
-func (s *Server) toProductJSON(r *http.Request, p catalog.Product) productJSON {
-	qty, _ := s.inv.Available(r.Context(), s.siteID, p.ID)
+func withQty(p clients.Product, qty int) productJSON {
 	return productJSON{
 		ID: p.ID, SKU: p.SKU, Name: p.Name, Description: p.Description,
-		PriceMinor: p.Price.Minor, Currency: p.Price.Currency, ImageURL: p.ImageURL,
+		PriceMinor: p.PriceMinor, Currency: p.Currency, ImageURL: p.ImageURL,
 		Active: p.Active, AvailableQty: qty,
 	}
 }
 
 func (s *Server) listProducts(w http.ResponseWriter, r *http.Request) {
-	list, err := s.cat.List(r.Context())
+	list, err := s.be.ListProducts(r.Context())
 	if err != nil {
-		writeDomainError(w, err)
+		httpjson.WriteError(w, http.StatusBadGateway, "upstream", err.Error())
+		return
+	}
+	ids := make([]string, 0, len(list))
+	for _, p := range list {
+		ids = append(ids, p.ID)
+	}
+	avail, err := s.be.Available(r.Context(), s.siteID, ids)
+	if err != nil {
+		httpjson.WriteError(w, http.StatusBadGateway, "upstream", err.Error())
 		return
 	}
 	out := make([]productJSON, 0, len(list))
 	for _, p := range list {
-		out = append(out, s.toProductJSON(r, p))
+		out = append(out, withQty(p, avail[p.ID]))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"products": out})
+	httpjson.Write(w, http.StatusOK, map[string]any{"products": out})
 }
 
 func (s *Server) getProduct(w http.ResponseWriter, r *http.Request) {
-	p, err := s.cat.Get(r.Context(), r.PathValue("id"))
-	if err != nil {
-		writeDomainError(w, err)
+	p, st, err := s.be.GetProduct(r.Context(), r.PathValue("id"))
+	if st == http.StatusNotFound {
+		httpjson.WriteError(w, http.StatusNotFound, "not_found", "not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, s.toProductJSON(r, p))
+	if st == http.StatusBadRequest {
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid", "invalid")
+		return
+	}
+	if err != nil {
+		httpjson.WriteError(w, http.StatusBadGateway, "upstream", err.Error())
+		return
+	}
+	avail, err := s.be.Available(r.Context(), s.siteID, []string{p.ID})
+	if err != nil {
+		httpjson.WriteError(w, http.StatusBadGateway, "upstream", err.Error())
+		return
+	}
+	httpjson.Write(w, http.StatusOK, withQty(p, avail[p.ID]))
 }
 
 func (s *Server) getCart(w http.ResponseWriter, r *http.Request) {
 	u, _ := auth.UserFrom(r.Context())
 	c, err := s.carts.Get(r.Context(), u.Sub)
 	if err != nil {
-		writeDomainError(w, err)
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid", err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, cartJSON(c))
+	httpjson.Write(w, http.StatusOK, cartJSON(c))
 }
 
 func (s *Server) addCartItem(w http.ResponseWriter, r *http.Request) {
@@ -133,20 +124,23 @@ func (s *Server) addCartItem(w http.ResponseWriter, r *http.Request) {
 		ProductID string `json:"productId"`
 		Qty       int    `json:"qty"`
 	}
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid", "invalid json")
+	if err := httpjson.Decode(r, &body); err != nil {
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid", "invalid json")
 		return
 	}
-	if _, err := s.cat.Get(r.Context(), body.ProductID); err != nil {
-		writeDomainError(w, err)
+	if _, st, err := s.be.GetProduct(r.Context(), body.ProductID); st == http.StatusNotFound || st == http.StatusBadRequest {
+		httpjson.WriteError(w, st, "invalid", "product")
+		return
+	} else if err != nil && st == 0 {
+		httpjson.WriteError(w, http.StatusBadGateway, "upstream", err.Error())
 		return
 	}
 	c, err := s.carts.Add(r.Context(), u.Sub, body.ProductID, body.Qty)
 	if err != nil {
-		writeDomainError(w, err)
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid", err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, cartJSON(c))
+	httpjson.Write(w, http.StatusOK, cartJSON(c))
 }
 
 func (s *Server) replaceCart(w http.ResponseWriter, r *http.Request) {
@@ -157,8 +151,8 @@ func (s *Server) replaceCart(w http.ResponseWriter, r *http.Request) {
 			Qty       int    `json:"qty"`
 		} `json:"items"`
 	}
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid", "invalid json")
+	if err := httpjson.Decode(r, &body); err != nil {
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid", "invalid json")
 		return
 	}
 	items := make([]cart.Item, 0, len(body.Items))
@@ -167,14 +161,19 @@ func (s *Server) replaceCart(w http.ResponseWriter, r *http.Request) {
 	}
 	c, err := s.carts.Replace(r.Context(), u.Sub, items)
 	if err != nil {
-		writeDomainError(w, err)
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid", err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, cartJSON(c))
+	httpjson.Write(w, http.StatusOK, cartJSON(c))
 }
 
 func (s *Server) checkout(w http.ResponseWriter, r *http.Request) {
 	u, _ := auth.UserFrom(r.Context())
+	raw, err := io.ReadAll(r.Body)
+	if err != nil {
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid", "invalid json")
+		return
+	}
 	var body struct {
 		IdempotencyKey string `json:"idempotencyKey"`
 		Lines          []struct {
@@ -182,95 +181,98 @@ func (s *Server) checkout(w http.ResponseWriter, r *http.Request) {
 			Qty       int    `json:"qty"`
 		} `json:"lines"`
 	}
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid", "invalid json")
-		return
-	}
-	key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
-	if key == "" {
-		key = strings.TrimSpace(body.IdempotencyKey)
-	}
-	in := order.CheckoutInput{BuyerSub: u.Sub, IdempotencyKey: key, SiteID: s.siteID}
-	if len(body.Lines) > 0 {
-		for _, ln := range body.Lines {
-			in.Lines = append(in.Lines, order.CheckoutLine{ProductID: ln.ProductID, Qty: ln.Qty})
-		}
-	} else {
-		in.UseCart = true
-	}
-	o, created, err := s.orders.Checkout(r.Context(), in)
-	if err != nil {
-		if o.ID != "" {
-			writeJSON(w, statusFor(err), map[string]any{"order": orderJSON(o), "error": errorBody(err)})
+	if len(bytes.TrimSpace(raw)) > 0 {
+		if err := json.Unmarshal(raw, &body); err != nil {
+			httpjson.WriteError(w, http.StatusBadRequest, "invalid", "invalid json")
 			return
 		}
-		writeDomainError(w, err)
+	}
+	useCart := len(body.Lines) == 0
+	if useCart {
+		c, err := s.carts.Get(r.Context(), u.Sub)
+		if err != nil {
+			httpjson.WriteError(w, http.StatusBadRequest, "invalid", err.Error())
+			return
+		}
+		if len(c.Items) == 0 {
+			httpjson.WriteError(w, http.StatusBadRequest, "invalid", "empty cart")
+			return
+		}
+		for _, it := range c.Items {
+			body.Lines = append(body.Lines, struct {
+				ProductID string `json:"productId"`
+				Qty       int    `json:"qty"`
+			}{it.ProductID, it.Qty})
+		}
+	}
+	payload, err := json.Marshal(map[string]any{
+		"idempotencyKey": body.IdempotencyKey,
+		"siteId":         s.siteID,
+		"lines":          body.Lines,
+	})
+	if err != nil {
+		httpjson.WriteError(w, http.StatusInternalServerError, "error", err.Error())
 		return
 	}
-	status := http.StatusCreated
-	if !created {
-		status = http.StatusOK
+	out, st, err := s.be.Checkout(r.Context(), payload, r.Header)
+	if err != nil {
+		httpjson.WriteError(w, http.StatusBadGateway, "upstream", err.Error())
+		return
 	}
-	writeJSON(w, status, orderJSON(o))
+	if useCart && st == http.StatusCreated {
+		var o struct {
+			Status string `json:"status"`
+		}
+		if json.Unmarshal(out, &o) == nil && o.Status == "paid" {
+			_ = s.carts.Clear(r.Context(), u.Sub)
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(st)
+	_, _ = w.Write(out)
 }
 
-func (s *Server) listOrders(w http.ResponseWriter, r *http.Request) {
-	u, _ := auth.UserFrom(r.Context())
-	list, err := s.orders.ListMine(r.Context(), u.Sub)
+func (s *Server) proxyOrderGET(w http.ResponseWriter, r *http.Request) {
+	out, st, err := s.be.GetOrders(r.Context(), r.URL.Path, r.Header)
 	if err != nil {
-		writeDomainError(w, err)
+		httpjson.WriteError(w, http.StatusBadGateway, "upstream", err.Error())
 		return
 	}
-	out := make([]any, 0, len(list))
-	for _, o := range list {
-		out = append(out, orderJSON(o))
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"orders": out})
-}
-
-func (s *Server) getOrder(w http.ResponseWriter, r *http.Request) {
-	u, _ := auth.UserFrom(r.Context())
-	o, err := s.orders.Get(r.Context(), r.PathValue("id"), u.Sub, u.Role == auth.RoleOps)
-	if err != nil {
-		writeDomainError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, orderJSON(o))
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(st)
+	_, _ = w.Write(out)
 }
 
 func (s *Server) opsCreateProduct(w http.ResponseWriter, r *http.Request) {
 	u, _ := auth.UserFrom(r.Context())
 	if u.Role != auth.RoleOps {
-		writeError(w, http.StatusForbidden, "forbidden", "ops role required")
+		httpjson.WriteError(w, http.StatusForbidden, "forbidden", "ops role required")
 		return
 	}
-	var body struct {
-		SKU         string `json:"sku"`
-		Name        string `json:"name"`
-		Description string `json:"description"`
-		PriceMinor  int64  `json:"priceMinor"`
-		Currency    string `json:"currency"`
-		ImageURL    string `json:"imageUrl"`
-	}
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid", "invalid json")
-		return
-	}
-	p, err := s.cat.Create(r.Context(), catalog.CreateInput{
-		SKU: body.SKU, Name: body.Name, Description: body.Description,
-		PriceMinor: body.PriceMinor, Currency: body.Currency, ImageURL: body.ImageURL,
-	})
+	raw, err := io.ReadAll(r.Body)
 	if err != nil {
-		writeDomainError(w, err)
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid", "invalid json")
 		return
 	}
-	writeJSON(w, http.StatusCreated, s.toProductJSON(r, p))
+	p, st, b, err := s.be.CreateProduct(r.Context(), raw)
+	if err != nil && st == 0 {
+		httpjson.WriteError(w, http.StatusBadGateway, "upstream", err.Error())
+		return
+	}
+	if st >= 400 {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(st)
+		_, _ = w.Write(b)
+		return
+	}
+	avail, _ := s.be.Available(r.Context(), s.siteID, []string{p.ID})
+	httpjson.Write(w, http.StatusCreated, withQty(p, avail[p.ID]))
 }
 
 func (s *Server) opsInbound(w http.ResponseWriter, r *http.Request) {
 	u, _ := auth.UserFrom(r.Context())
 	if u.Role != auth.RoleOps {
-		writeError(w, http.StatusForbidden, "forbidden", "ops role required")
+		httpjson.WriteError(w, http.StatusForbidden, "forbidden", "ops role required")
 		return
 	}
 	var body struct {
@@ -278,18 +280,25 @@ func (s *Server) opsInbound(w http.ResponseWriter, r *http.Request) {
 		Qty       int    `json:"qty"`
 		Reason    string `json:"reason"`
 	}
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid", "invalid json")
+	if err := httpjson.Decode(r, &body); err != nil {
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid", "invalid json")
 		return
 	}
-	b, err := s.inv.Inbound(r.Context(), s.siteID, body.ProductID, u.Sub, body.Reason, body.Qty)
-	if err != nil {
-		writeDomainError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, map[string]any{
-		"productId": b.ProductID, "qty": b.Qty, "reservedQty": b.ReservedQty, "availableQty": b.Available(),
+	payload, _ := json.Marshal(map[string]any{
+		"siteId": s.siteID, "productId": body.ProductID, "qty": body.Qty, "reason": body.Reason, "actorId": u.Sub,
 	})
+	out, st, b, err := s.be.Inbound(r.Context(), payload)
+	if err != nil && st == 0 {
+		httpjson.WriteError(w, http.StatusBadGateway, "upstream", err.Error())
+		return
+	}
+	if st >= 400 {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(st)
+		_, _ = w.Write(b)
+		return
+	}
+	httpjson.Write(w, st, out)
 }
 
 func cartJSON(c cart.Cart) map[string]any {
@@ -298,91 +307,4 @@ func cartJSON(c cart.Cart) map[string]any {
 		items = append(items, map[string]any{"productId": it.ProductID, "qty": it.Qty, "updatedAt": it.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z")})
 	}
 	return map[string]any{"buyerSub": c.BuyerSub, "items": items}
-}
-
-func orderJSON(o order.Order) map[string]any {
-	lines := make([]map[string]any, 0, len(o.Lines))
-	for _, ln := range o.Lines {
-		lines = append(lines, map[string]any{
-			"productId": ln.ProductID, "sku": ln.SKU, "name": ln.Name, "qty": ln.Qty,
-			"unitPriceMinor": ln.UnitPriceMinor, "currency": ln.Currency,
-		})
-	}
-	return map[string]any{
-		"id": o.ID, "buyerSub": o.BuyerSub, "status": o.Status, "cancelReason": o.CancelReason,
-		"amountMinor": o.Amount.Minor, "currency": o.Amount.Currency,
-		"idempotencyKey": o.IdempotencyKey, "paymentId": o.PaymentID,
-		"lines":     lines,
-		"createdAt": o.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
-		"updatedAt": o.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z"),
-	}
-}
-
-func decodeJSON(r *http.Request, dest any) error {
-	dec := json.NewDecoder(r.Body)
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(dest); err != nil {
-		return err
-	}
-	return nil
-}
-
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
-}
-
-func writeError(w http.ResponseWriter, status int, code, msg string) {
-	writeJSON(w, status, map[string]any{"error": map[string]string{"code": code, "message": msg}})
-}
-
-func errorBody(err error) map[string]string {
-	code, msg := codeOf(err)
-	return map[string]string{"code": code, "message": msg}
-}
-
-func writeDomainError(w http.ResponseWriter, err error) {
-	st := statusFor(err)
-	code, msg := codeOf(err)
-	writeError(w, st, code, msg)
-}
-
-func statusFor(err error) int {
-	switch {
-	case errors.Is(err, catalog.ErrNotFound), errors.Is(err, order.ErrNotFound), errors.Is(err, inventory.ErrNotFound):
-		return http.StatusNotFound
-	case errors.Is(err, order.ErrForbidden):
-		return http.StatusForbidden
-	case errors.Is(err, inventory.ErrShortage):
-		return http.StatusConflict
-	case errors.Is(err, payment.ErrDeclined):
-		return http.StatusConflict
-	case errors.Is(err, catalog.ErrConflict), errors.Is(err, order.ErrConflict):
-		return http.StatusConflict
-	case errors.Is(err, catalog.ErrInvalid), errors.Is(err, order.ErrInvalid), errors.Is(err, inventory.ErrInvalid), errors.Is(err, cart.ErrInvalid), errors.Is(err, money.ErrInvalid), errors.Is(err, money.ErrCurrency):
-		return http.StatusBadRequest
-	default:
-		return http.StatusInternalServerError
-	}
-}
-
-func codeOf(err error) (string, string) {
-	switch {
-	case errors.Is(err, inventory.ErrShortage):
-		return "inventory_shortage", "not enough stock"
-	case errors.Is(err, payment.ErrDeclined):
-		return "payment_failed", "payment declined"
-	case errors.Is(err, order.ErrForbidden):
-		return "forbidden", "forbidden"
-	case errors.Is(err, catalog.ErrNotFound), errors.Is(err, order.ErrNotFound):
-		return "not_found", "not found"
-	case errors.Is(err, catalog.ErrConflict), errors.Is(err, order.ErrConflict):
-		return "conflict", err.Error()
-	default:
-		if err == nil {
-			return "error", "error"
-		}
-		return "invalid", err.Error()
-	}
 }
