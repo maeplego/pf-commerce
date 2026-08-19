@@ -138,6 +138,22 @@ func (h *HTTP) GetOrders(ctx context.Context, path string, header http.Header) (
 	return b, res.StatusCode, err
 }
 
+func (h *HTTP) PostOrder(ctx context.Context, path string, header http.Header) ([]byte, int, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, h.Order+path, bytes.NewReader([]byte("{}")))
+	if err != nil {
+		return nil, 0, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	copyAuth(req, header)
+	res, err := h.Client.Do(req)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer res.Body.Close()
+	b, err := io.ReadAll(res.Body)
+	return b, res.StatusCode, err
+}
+
 func copyAuth(req *http.Request, header http.Header) {
 	for _, k := range []string{"X-Dev-User-Sub", "X-Dev-Role", "Idempotency-Key", "Content-Type"} {
 		if v := header.Get(k); v != "" {

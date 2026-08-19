@@ -41,7 +41,7 @@ func main() {
 	clk := clock.System{}
 
 	var (
-		repo   order.Repository
+		repo   order.Persistence
 		ready  func() error
 		closer func()
 	)

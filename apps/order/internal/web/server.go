@@ -1,6 +1,7 @@
 package web
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -30,7 +31,10 @@ func (s *Server) Routes() http.Handler {
 	httpjson.MountHealth(mux, s.ready)
 	mux.Handle("POST /v1/checkout", s.auth.Handler(http.HandlerFunc(s.checkout)))
 	mux.Handle("GET /v1/orders", s.auth.Handler(http.HandlerFunc(s.list)))
+	mux.Handle("GET /v1/orders/{id}/events", s.auth.Handler(http.HandlerFunc(s.events)))
+	mux.Handle("POST /v1/orders/{id}/ship", s.auth.Handler(http.HandlerFunc(s.ship)))
 	mux.Handle("GET /v1/orders/{id}", s.auth.Handler(http.HandlerFunc(s.get)))
+	mux.Handle("POST /v1/admin/projections/rebuild", s.auth.Handler(http.HandlerFunc(s.rebuild)))
 	return mux
 }
 
@@ -100,6 +104,51 @@ func (s *Server) get(w http.ResponseWriter, r *http.Request) {
 	httpjson.Write(w, http.StatusOK, orderJSON(o))
 }
 
+func (s *Server) events(w http.ResponseWriter, r *http.Request) {
+	u, _ := auth.UserFrom(r.Context())
+	evs, err := s.orders.Events(r.Context(), r.PathValue("id"), u.Sub, u.Role == auth.RoleOps)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	out := make([]map[string]any, 0, len(evs))
+	for _, e := range evs {
+		var data any
+		if len(e.Data) > 0 {
+			_ = json.Unmarshal(e.Data, &data)
+		}
+		out = append(out, map[string]any{
+			"id": e.ID, "streamId": e.StreamID, "version": e.Version,
+			"type": e.Type, "time": e.Time.UTC().Format("2006-01-02T15:04:05Z"),
+			"data": data,
+		})
+	}
+	httpjson.Write(w, http.StatusOK, map[string]any{"events": out})
+}
+
+func (s *Server) ship(w http.ResponseWriter, r *http.Request) {
+	u, _ := auth.UserFrom(r.Context())
+	o, err := s.orders.Ship(r.Context(), r.PathValue("id"), u.Sub, u.Role == auth.RoleOps)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	httpjson.Write(w, http.StatusOK, orderJSON(o))
+}
+
+func (s *Server) rebuild(w http.ResponseWriter, r *http.Request) {
+	u, _ := auth.UserFrom(r.Context())
+	if u.Role != auth.RoleOps {
+		httpjson.WriteError(w, http.StatusForbidden, "forbidden", "ops role required")
+		return
+	}
+	if err := s.orders.Rebuild(r.Context()); err != nil {
+		writeErr(w, err)
+		return
+	}
+	httpjson.Write(w, http.StatusOK, map[string]any{"ok": true})
+}
+
 func OrderJSON(o order.Order) map[string]any { return orderJSON(o) }
 
 func orderJSON(o order.Order) map[string]any {
@@ -137,7 +186,7 @@ func statusFor(err error) int {
 		return http.StatusNotFound
 	case errors.Is(err, order.ErrForbidden):
 		return http.StatusForbidden
-	case errors.Is(err, order.ErrShortage), errors.Is(err, order.ErrDeclined), errors.Is(err, order.ErrConflict):
+	case errors.Is(err, order.ErrShortage), errors.Is(err, order.ErrDeclined), errors.Is(err, order.ErrConflict), errors.Is(err, order.ErrInvalidTransition):
 		return http.StatusConflict
 	case errors.Is(err, order.ErrInvalid), errors.Is(err, money.ErrInvalid), errors.Is(err, money.ErrCurrency):
 		return http.StatusBadRequest
@@ -158,6 +207,8 @@ func codeOf(err error) (string, string) {
 		return "not_found", "not found"
 	case errors.Is(err, order.ErrConflict):
 		return "conflict", err.Error()
+	case errors.Is(err, order.ErrInvalidTransition):
+		return "invalid_transition", "illegal order state"
 	default:
 		if err == nil {
 			return "error", "error"

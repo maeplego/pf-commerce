@@ -14,7 +14,8 @@ var (
 	ErrInvalid   = errors.New("invalid order")
 	ErrConflict  = errors.New("order conflict")
 	ErrForbidden = errors.New("order forbidden")
-	ErrShortage  = errors.New("inventory shortage")
+	ErrShortage          = errors.New("inventory shortage")
+	ErrInvalidTransition = errors.New("invalid order transition")
 )
 
 type Status string
@@ -23,6 +24,7 @@ const (
 	StatusPending   Status = "pending"
 	StatusPaid      Status = "paid"
 	StatusCancelled Status = "cancelled"
+	StatusShipped   Status = "shipped"
 )
 
 const (
@@ -92,22 +94,22 @@ type StockClient interface {
 }
 
 type Service struct {
-	orders  Repository
+	store   Persistence
 	catalog CatalogClient
 	stock   StockClient
 	pay     Gateway
 	now     func() time.Time
 }
 
-func NewService(orders Repository, cat CatalogClient, stock StockClient, pay Gateway, now func() time.Time) *Service {
+func NewService(store Persistence, cat CatalogClient, stock StockClient, pay Gateway, now func() time.Time) *Service {
 	if now == nil {
 		now = func() time.Time { return time.Now().UTC() }
 	}
-	return &Service{orders: orders, catalog: cat, stock: stock, pay: pay, now: now}
+	return &Service{store: store, catalog: cat, stock: stock, pay: pay, now: now}
 }
 
 func (s *Service) Get(ctx context.Context, orderID, actorSub string, ops bool) (Order, error) {
-	o, err := s.orders.Get(ctx, orderID)
+	o, err := s.store.Get(ctx, orderID)
 	if err != nil {
 		return Order{}, err
 	}
@@ -121,14 +123,44 @@ func (s *Service) ListMine(ctx context.Context, buyerSub string) ([]Order, error
 	if buyerSub == "" {
 		return nil, ErrInvalid
 	}
-	return s.orders.ListByBuyer(ctx, buyerSub)
+	return s.store.ListByBuyer(ctx, buyerSub)
+}
+
+func (s *Service) Events(ctx context.Context, orderID, actorSub string, ops bool) ([]RecordedEvent, error) {
+	if _, err := s.Get(ctx, orderID, actorSub, ops); err != nil {
+		return nil, err
+	}
+	return s.store.Load(ctx, orderID)
+}
+
+func (s *Service) Rebuild(ctx context.Context) error {
+	return s.store.RebuildProjections(ctx)
+}
+
+func (s *Service) Ship(ctx context.Context, orderID, actorSub string, ops bool) (Order, error) {
+	o, err := s.Get(ctx, orderID, actorSub, ops)
+	if err != nil {
+		return Order{}, err
+	}
+	evs, err := s.store.Load(ctx, orderID)
+	if err != nil {
+		return Order{}, err
+	}
+	cmds, err := DecideShip(o, s.now())
+	if err != nil {
+		return Order{}, err
+	}
+	if err := s.store.Append(ctx, orderID, len(evs), cmds); err != nil {
+		return Order{}, err
+	}
+	return s.store.Get(ctx, orderID)
 }
 
 func (s *Service) Checkout(ctx context.Context, in CheckoutInput) (Order, bool, error) {
 	if in.BuyerSub == "" || in.IdempotencyKey == "" || in.SiteID == "" {
 		return Order{}, false, ErrInvalid
 	}
-	if existing, err := s.orders.GetByIdempotency(ctx, in.BuyerSub, in.IdempotencyKey); err == nil {
+	if existing, err := s.store.GetByIdempotency(ctx, in.BuyerSub, in.IdempotencyKey); err == nil {
 		return existing, false, nil
 	} else if err != ErrNotFound {
 		return Order{}, false, err
@@ -140,39 +172,50 @@ func (s *Service) Checkout(ctx context.Context, in CheckoutInput) (Order, bool, 
 	}
 
 	now := s.now()
-	o := Order{
-		ID:             id.New(),
-		BuyerSub:       in.BuyerSub,
-		Status:         StatusPending,
-		Amount:         total,
-		IdempotencyKey: in.IdempotencyKey,
-		Lines:          lines,
-		CreatedAt:      now,
-		UpdatedAt:      now,
+	orderID := id.New()
+	created, err := DecideCreate(Order{}, in, lines, total.Minor, total.Currency, now)
+	if err != nil {
+		return Order{}, false, err
 	}
-	if err := s.orders.Create(ctx, o); err != nil {
+	if err := s.store.Append(ctx, orderID, 0, created); err != nil {
 		if errors.Is(err, ErrConflict) {
-			existing, gerr := s.orders.GetByIdempotency(ctx, in.BuyerSub, in.IdempotencyKey)
+			existing, gerr := s.store.GetByIdempotency(ctx, in.BuyerSub, in.IdempotencyKey)
 			return existing, false, gerr
 		}
 		return Order{}, false, err
 	}
+	o, err := s.store.Get(ctx, orderID)
+	if err != nil {
+		return Order{}, false, err
+	}
+	version := 1
 
 	for _, ln := range lines {
 		if err := s.stock.Reserve(ctx, in.SiteID, ln.ProductID, o.ID, in.BuyerSub, ln.Qty); err != nil {
 			_ = s.stock.ReleaseOrder(ctx, o.ID, in.BuyerSub, ReasonShortage)
-			o.Status = StatusCancelled
-			o.CancelReason = ReasonShortage
-			o.UpdatedAt = s.now()
-			if uerr := s.orders.Update(ctx, o); uerr != nil {
-				return Order{}, true, uerr
+			evs, derr := DecideShortage(o, s.now())
+			if derr != nil {
+				return Order{}, true, derr
 			}
+			if aerr := s.store.Append(ctx, o.ID, version, evs); aerr != nil {
+				return Order{}, true, aerr
+			}
+			o, _ = s.store.Get(ctx, o.ID)
 			if errors.Is(err, ErrShortage) {
 				return o, true, ErrShortage
 			}
 			return o, true, err
 		}
 	}
+	reserved, err := DecideReserveOK(o, s.now())
+	if err != nil {
+		return Order{}, true, err
+	}
+	if err := s.store.Append(ctx, o.ID, version, reserved); err != nil {
+		return Order{}, true, err
+	}
+	version++
+	o, _ = s.store.Get(ctx, o.ID)
 
 	ch, err := s.pay.Charge(ctx, ChargeRequest{
 		IdempotencyKey: "pay:" + in.IdempotencyKey,
@@ -182,28 +225,39 @@ func (s *Service) Checkout(ctx context.Context, in CheckoutInput) (Order, bool, 
 	})
 	if err != nil {
 		_ = s.stock.ReleaseOrder(ctx, o.ID, in.BuyerSub, ReasonPayment)
-		o.Status = StatusCancelled
-		o.CancelReason = ReasonPayment
-		o.UpdatedAt = s.now()
-		if uerr := s.orders.Update(ctx, o); uerr != nil {
-			return Order{}, true, uerr
+		evs, derr := DecidePaymentFail(o, s.now())
+		if derr != nil {
+			return Order{}, true, derr
 		}
+		if aerr := s.store.Append(ctx, o.ID, version, evs); aerr != nil {
+			return Order{}, true, aerr
+		}
+		o, _ = s.store.Get(ctx, o.ID)
 		return o, true, err
 	}
 
 	if err := s.stock.ConsumeOrder(ctx, o.ID, in.BuyerSub); err != nil {
 		_ = s.stock.ReleaseOrder(ctx, o.ID, in.BuyerSub, "consume_failed")
-		o.Status = StatusCancelled
-		o.CancelReason = "consume_failed"
-		o.UpdatedAt = s.now()
-		_ = s.orders.Update(ctx, o)
+		evs, derr := DecideCancel(o, "consume_failed", s.now())
+		if derr != nil {
+			return Order{}, true, derr
+		}
+		if aerr := s.store.Append(ctx, o.ID, version, evs); aerr != nil {
+			return Order{}, true, aerr
+		}
+		o, _ = s.store.Get(ctx, o.ID)
 		return o, true, err
 	}
 
-	o.Status = StatusPaid
-	o.PaymentID = ch.ID
-	o.UpdatedAt = s.now()
-	if err := s.orders.Update(ctx, o); err != nil {
+	paid, err := DecidePaymentOK(o, ch.ID, s.now())
+	if err != nil {
+		return Order{}, true, err
+	}
+	if err := s.store.Append(ctx, o.ID, version, paid); err != nil {
+		return Order{}, true, err
+	}
+	o, err = s.store.Get(ctx, o.ID)
+	if err != nil {
 		return Order{}, true, err
 	}
 	return o, true, nil

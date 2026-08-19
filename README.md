@@ -17,7 +17,7 @@ P06 commerce-platform の製品リポジトリです。**学習用であり、�
 
 共有は `packages/` の薄いもの（整数金額、ULID、dev auth、JSON）だけです。注文フローの正しさはプロセス間 HTTP でも、公開契約（在庫 1 → 201 と 409）は変えていません。
 
-K8s overlay D（P01+P02+P03+P06）は `deploy/k8s/`。P07 / GraphQL BFF / 注文のイベントストア化は **未着手**。商品画像は URL 文字列。認証は `X-Dev-User-Sub`。
+K8s overlay D（P01+P02+P03+P06）は `deploy/k8s/`。注文はイベントストア + 一覧投影。P07 / GraphQL BFF は **未着手**。商品画像は URL 文字列。認証は `X-Dev-User-Sub`。
 
 ## 単体デモ
 
@@ -78,6 +78,7 @@ go test ./...
 ## 既知の制限
 
 - まだ 8 サービス / 8 リポジトリではない。cart は gateway、決済は order 内モック
+- 注文タイムラインは `GET /v1/orders/{id}/events`。payment/notify 抽出と GraphQL BFF は未着手
 - overlay D は P06 サブセット。P07 / P11 / P12 / P13 は未搭載
 - 予約 TTL 切れは次の Reserve 時に回収
 - ops-web / GraphQL / 出荷 / メール / 推薦スロットなし

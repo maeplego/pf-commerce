@@ -38,7 +38,10 @@ func (s *Server) Routes() http.Handler {
 	mux.Handle("PUT /v1/cart", s.auth.Handler(http.HandlerFunc(s.replaceCart)))
 	mux.Handle("POST /v1/checkout", s.auth.Handler(http.HandlerFunc(s.checkout)))
 	mux.Handle("GET /v1/orders", s.auth.Handler(http.HandlerFunc(s.proxyOrderGET)))
+	mux.Handle("GET /v1/orders/{id}/events", s.auth.Handler(http.HandlerFunc(s.proxyOrderGET)))
+	mux.Handle("POST /v1/orders/{id}/ship", s.auth.Handler(http.HandlerFunc(s.proxyOrderPOST)))
 	mux.Handle("GET /v1/orders/{id}", s.auth.Handler(http.HandlerFunc(s.proxyOrderGET)))
+	mux.Handle("POST /v1/admin/projections/rebuild", s.auth.Handler(http.HandlerFunc(s.proxyOrderPOST)))
 	mux.Handle("POST /v1/ops/products", s.auth.Handler(http.HandlerFunc(s.opsCreateProduct)))
 	mux.Handle("POST /v1/ops/stock-inbound", s.auth.Handler(http.HandlerFunc(s.opsInbound)))
 	return httpjson.CORS(s.cors, mux)
@@ -234,6 +237,17 @@ func (s *Server) checkout(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) proxyOrderGET(w http.ResponseWriter, r *http.Request) {
 	out, st, err := s.be.GetOrders(r.Context(), r.URL.Path, r.Header)
+	if err != nil {
+		httpjson.WriteError(w, http.StatusBadGateway, "upstream", err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(st)
+	_, _ = w.Write(out)
+}
+
+func (s *Server) proxyOrderPOST(w http.ResponseWriter, r *http.Request) {
+	out, st, err := s.be.PostOrder(r.Context(), r.URL.Path, r.Header)
 	if err != nil {
 		httpjson.WriteError(w, http.StatusBadGateway, "upstream", err.Error())
 		return

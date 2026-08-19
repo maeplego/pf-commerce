@@ -24,3 +24,17 @@ CREATE TABLE IF NOT EXISTS commerce_order_lines (
   currency TEXT NOT NULL,
   PRIMARY KEY (order_id, product_id)
 );
+
+-- Event store is the write model. commerce_orders is the list projection.
+CREATE TABLE IF NOT EXISTS commerce_order_events (
+  stream_id TEXT NOT NULL,
+  version INTEGER NOT NULL CHECK (version > 0),
+  event_id TEXT NOT NULL,
+  event_type TEXT NOT NULL,
+  occurred_at TIMESTAMPTZ NOT NULL,
+  payload JSONB NOT NULL,
+  PRIMARY KEY (stream_id, version),
+  UNIQUE (event_id)
+);
+
+CREATE INDEX IF NOT EXISTS commerce_order_events_type_idx ON commerce_order_events (event_type);

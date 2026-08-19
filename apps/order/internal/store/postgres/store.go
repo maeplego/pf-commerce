@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"embed"
+	"encoding/json"
 	"errors"
 	"strings"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/portfolio/pf-commerce/apps/order/internal/order"
+	"github.com/portfolio/pf-commerce/packages/id"
 	"github.com/portfolio/pf-commerce/packages/money"
 )
 
@@ -202,4 +204,163 @@ func scanOrder(row pgx.Row) (order.Order, error) {
 	}
 	o.Amount = amt
 	return o, nil
+}
+
+func (s *Store) Append(ctx context.Context, streamID string, expectedVersion int, events []order.NewEvent) error {
+	if len(events) == 0 {
+		return nil
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	var current int
+	err = tx.QueryRow(ctx, `SELECT COALESCE(MAX(version), 0) FROM commerce_order_events WHERE stream_id=$1`, streamID).Scan(&current)
+	if err != nil {
+		return err
+	}
+	if current != expectedVersion {
+		return order.ErrConflict
+	}
+	for i, e := range events {
+		raw, err := json.Marshal(e.Data)
+		if err != nil {
+			return err
+		}
+		if e.Data == nil {
+			raw = []byte("{}")
+		}
+		_, err = tx.Exec(ctx, `INSERT INTO commerce_order_events
+			(stream_id, version, event_id, event_type, occurred_at, payload)
+			VALUES ($1,$2,$3,$4,$5,$6)`,
+			streamID, expectedVersion+i+1, id.New(), string(e.Type), e.Time, raw)
+		if isUnique(err) {
+			return order.ErrConflict
+		}
+		if err != nil {
+			return err
+		}
+	}
+	rows, err := tx.Query(ctx, `SELECT stream_id, version, event_id, event_type, occurred_at, payload
+		FROM commerce_order_events WHERE stream_id=$1 ORDER BY version`, streamID)
+	if err != nil {
+		return err
+	}
+	evs, err := scanEvents(rows)
+	if err != nil {
+		return err
+	}
+	o, err := order.Fold(evs)
+	if err != nil {
+		return err
+	}
+	if err := upsertProjection(ctx, tx, o); err != nil {
+		if isUnique(err) {
+			return order.ErrConflict
+		}
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func (s *Store) Load(ctx context.Context, streamID string) ([]order.RecordedEvent, error) {
+	rows, err := s.pool.Query(ctx, `SELECT stream_id, version, event_id, event_type, occurred_at, payload
+		FROM commerce_order_events WHERE stream_id=$1 ORDER BY version`, streamID)
+	if err != nil {
+		return nil, err
+	}
+	evs, err := scanEvents(rows)
+	if err != nil {
+		return nil, err
+	}
+	if len(evs) == 0 {
+		return nil, order.ErrNotFound
+	}
+	return evs, nil
+}
+
+func (s *Store) LoadAll(ctx context.Context) ([]order.RecordedEvent, error) {
+	rows, err := s.pool.Query(ctx, `SELECT stream_id, version, event_id, event_type, occurred_at, payload
+		FROM commerce_order_events ORDER BY stream_id, version`)
+	if err != nil {
+		return nil, err
+	}
+	return scanEvents(rows)
+}
+
+func (s *Store) RebuildProjections(ctx context.Context) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `DELETE FROM commerce_order_lines`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM commerce_orders`); err != nil {
+		return err
+	}
+	rows, err := tx.Query(ctx, `SELECT stream_id, version, event_id, event_type, occurred_at, payload
+		FROM commerce_order_events ORDER BY stream_id, version`)
+	if err != nil {
+		return err
+	}
+	evs, err := scanEvents(rows)
+	if err != nil {
+		return err
+	}
+	byStream := map[string][]order.RecordedEvent{}
+	for _, e := range evs {
+		byStream[e.StreamID] = append(byStream[e.StreamID], e)
+	}
+	for _, stream := range byStream {
+		o, err := order.Fold(stream)
+		if err != nil {
+			return err
+		}
+		if err := upsertProjection(ctx, tx, o); err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
+}
+
+func scanEvents(rows pgx.Rows) ([]order.RecordedEvent, error) {
+	defer rows.Close()
+	var out []order.RecordedEvent
+	for rows.Next() {
+		var e order.RecordedEvent
+		var typ string
+		if err := rows.Scan(&e.StreamID, &e.Version, &e.ID, &typ, &e.Time, &e.Data); err != nil {
+			return nil, err
+		}
+		e.Type = order.EventType(typ)
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+func upsertProjection(ctx context.Context, tx pgx.Tx, o order.Order) error {
+	_, err := tx.Exec(ctx, `INSERT INTO commerce_orders
+		(id, buyer_sub, status, cancel_reason, amount_minor, currency, idempotency_key, payment_id, created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+		ON CONFLICT (id) DO UPDATE SET
+			status=EXCLUDED.status, cancel_reason=EXCLUDED.cancel_reason, payment_id=EXCLUDED.payment_id, updated_at=EXCLUDED.updated_at`,
+		o.ID, o.BuyerSub, o.Status, o.CancelReason, o.Amount.Minor, o.Amount.Currency, o.IdempotencyKey, o.PaymentID, o.CreatedAt, o.UpdatedAt)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM commerce_order_lines WHERE order_id=$1`, o.ID); err != nil {
+		return err
+	}
+	for _, ln := range o.Lines {
+		if _, err := tx.Exec(ctx, `INSERT INTO commerce_order_lines
+			(order_id, product_id, sku, name, qty, unit_price_minor, currency)
+			VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+			o.ID, ln.ProductID, ln.SKU, ln.Name, ln.Qty, ln.UnitPriceMinor, ln.Currency); err != nil {
+			return err
+		}
+	}
+	return nil
 }
