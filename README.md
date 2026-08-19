@@ -24,10 +24,10 @@ docker compose up -d --build
 
 | URL | 用途 |
 | --- | --- |
-| http://localhost:3008 | ストアフロント |
-| http://localhost:3008/demo | 在庫 1 を buyer-a / buyer-b が同時購入 |
-| http://localhost:8098/health | API liveness |
-| http://localhost:8098/ready | API readiness（Postgres ping） |
+| http://localhost:3009 | ストアフロント |
+| http://localhost:3009/demo | 在庫 1 を buyer-a / buyer-b が同時購入 |
+| http://localhost:8099/health | API liveness |
+| http://localhost:8099/ready | API readiness（Postgres ping） |
 
 シード: `MUG-1` 在庫 1、`TEE-1` 在庫 20、`STK-1` 在庫 0。金額は整数円。
 
@@ -40,10 +40,10 @@ docker compose up -d --build
 API だけなら:
 
 ```powershell
-curl http://localhost:8098/v1/products
+curl http://localhost:8099/v1/products
 curl -H "X-Dev-User-Sub: buyer-a" -H "Content-Type: application/json" `
   -d '{"idempotencyKey":"key-a","lines":[{"productId":"<MUG-ID>","qty":1}]}' `
-  http://localhost:8098/v1/checkout
+  http://localhost:8099/v1/checkout
 ```
 
 ## テスト

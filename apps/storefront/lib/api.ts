@@ -1,4 +1,4 @@
-export const apiBase = process.env.NEXT_PUBLIC_COMMERCE_API_URL ?? "http://localhost:8098";
+export const apiBase = process.env.NEXT_PUBLIC_COMMERCE_API_URL ?? "http://localhost:8099";
 
 export type Product = {
   id: string;

@@ -20,12 +20,12 @@ services:
       context: ../apps/api
       dockerfile: Dockerfile
     environment:
-      COMMERCE_HTTP_PORT: "8098"
+      COMMERCE_HTTP_PORT: "8099"
       COMMERCE_DEV_AUTH: ${COMMERCE_DEV_AUTH:-true}
-      COMMERCE_CORS_ORIGIN: ${COMMERCE_CORS_ORIGIN:-http://localhost:3008}
+      COMMERCE_CORS_ORIGIN: ${COMMERCE_CORS_ORIGIN:-http://localhost:3009}
       COMMERCE_DATABASE_URL: ${COMMERCE_DATABASE_URL:-postgres://commerce:commerce@commerce-db:5432/commerce?sslmode=disable}
     ports:
-      - "8098:8098"
+      - "8099:8099"
     depends_on:
       commerce-db:
         condition: service_healthy
@@ -35,11 +35,11 @@ services:
       context: ../apps/storefront
       dockerfile: Dockerfile
       args:
-        NEXT_PUBLIC_COMMERCE_API_URL: ${NEXT_PUBLIC_COMMERCE_API_URL:-http://localhost:8098}
+        NEXT_PUBLIC_COMMERCE_API_URL: ${NEXT_PUBLIC_COMMERCE_API_URL:-http://localhost:8099}
     environment:
-      NEXT_PUBLIC_COMMERCE_API_URL: ${NEXT_PUBLIC_COMMERCE_API_URL:-http://localhost:8098}
+      NEXT_PUBLIC_COMMERCE_API_URL: ${NEXT_PUBLIC_COMMERCE_API_URL:-http://localhost:8099}
     ports:
-      - "3008:3008"
+      - "3009:3009"
     depends_on:
       - commerce-api
 

@@ -18,7 +18,7 @@ type Config struct {
 func FromEnv() (Config, error) {
 	port := strings.TrimSpace(os.Getenv("COMMERCE_HTTP_PORT"))
 	if port == "" {
-		port = "8098"
+		port = "8099"
 	}
 	devAuth := strings.EqualFold(os.Getenv("COMMERCE_DEV_AUTH"), "true") || os.Getenv("COMMERCE_DEV_AUTH") == "1"
 	ttl := 15 * time.Minute
@@ -30,7 +30,7 @@ func FromEnv() (Config, error) {
 		ReservationTTL: ttl,
 	}
 	if cfg.CORSOrigin == "" {
-		cfg.CORSOrigin = "http://localhost:3008"
+		cfg.CORSOrigin = "http://localhost:3009"
 	}
 	if !cfg.DevAuth {
 		return cfg, fmt.Errorf("COMMERCE_DEV_AUTH=true is required in this slice (P01 OIDC is not wired yet)")
