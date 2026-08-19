@@ -33,6 +33,8 @@ docker compose up -d --build
 | http://localhost:8099/health | gateway |
 | http://localhost:8110/health | BFF |
 
+BFF の GraphQL はストアフロント origin（既定 `http://localhost:3009`）からのブラウザ呼び出しだけ CORS を付けます。curl など Origin なしは通します。
+
 `/demo` で左右の「MUG-1 を 1点買う」をほぼ同時に押すと、片方だけ成功し、もう片方は在庫不足になります。
 
 推薦 API が落ちているときは、BFF はカタログ順に戻します（fail-closed）。

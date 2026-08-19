@@ -99,6 +99,7 @@ services:
       COMMERCE_HTTP_PORT: "8110"
       COMMERCE_CATALOG_URL: http://commerce-catalog:8101
       COMMERCE_INVENTORY_URL: http://commerce-inventory:8102
+      COMMERCE_BFF_CORS_ORIGIN: ${COMMERCE_BFF_CORS_ORIGIN:-http://localhost:3009}
       RECOMMEND_API_URL: ${RECOMMEND_API_URL:-}
     ports:
       - "8110:8110"

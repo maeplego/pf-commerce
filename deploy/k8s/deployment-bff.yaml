@@ -28,6 +28,8 @@ spec:
               value: http://catalog.p06.svc.cluster.local:8101
             - name: COMMERCE_INVENTORY_URL
               value: http://inventory.p06.svc.cluster.local:8102
+            - name: COMMERCE_BFF_CORS_ORIGIN
+              value: http://commerce.localhost
             - name: RECOMMEND_API_URL
               value: http://api.p07.svc.cluster.local:8098
           readinessProbe:

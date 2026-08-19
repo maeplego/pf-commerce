@@ -7,6 +7,7 @@ import { createServer } from "node:http";
 import { graphql, buildSchema } from "./graphql.js";
 import { createLoaders } from "./loaders.js";
 import { resolveSlot } from "./recommend.js";
+import { defaultBffCorsOrigin, graphqlOriginGate } from "./cors.js";
 
 const catalogURL = (process.env.COMMERCE_CATALOG_URL ?? "http://localhost:8101").replace(/\/$/, "");
 const inventoryURL = (process.env.COMMERCE_INVENTORY_URL ?? "http://localhost:8102").replace(/\/$/, "");
@@ -125,6 +126,13 @@ const server = createServer(async (req, res) => {
     return;
   }
   if (req.method === "POST" && req.url === "/graphql") {
+    const originGate = graphqlOriginGate(req.headers.origin, defaultBffCorsOrigin());
+    if (!originGate.ok) {
+      res.statusCode = 403;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ errors: [{ message: "origin not allowed" }] }));
+      return;
+    }
     const chunks = [];
     for await (const c of req) chunks.push(c);
     let body = {};
@@ -138,13 +146,22 @@ const server = createServer(async (req, res) => {
     const sid = await siteId();
     const result = await executeQuery({ query: body.query, variables: body.variables, siteId: sid });
     res.setHeader("Content-Type", "application/json");
-    res.setHeader("Access-Control-Allow-Origin", "*");
+    for (const [key, value] of Object.entries(originGate.headers)) {
+      res.setHeader(key, value);
+    }
     res.end(JSON.stringify(result));
     return;
   }
   if (req.method === "OPTIONS") {
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+    const originGate = graphqlOriginGate(req.headers.origin, defaultBffCorsOrigin());
+    if (!originGate.ok) {
+      res.statusCode = 403;
+      res.end();
+      return;
+    }
+    for (const [key, value] of Object.entries(originGate.headers)) {
+      res.setHeader(key, value);
+    }
     res.statusCode = 204;
     res.end();
     return;
