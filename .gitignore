@@ -1,0 +1,22 @@
+# Binaries and modules
+/bin/
+/dist/
+*.exe
+*.test
+*.out
+coverage.out
+vendor/
+node_modules/
+.next/
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+*.log
