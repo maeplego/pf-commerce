@@ -20,5 +20,21 @@ func Ensure(ctx context.Context, cat *catalog.Service) error {
 			return err
 		}
 	}
+	mug, err := cat.GetBySKU(ctx, "MUG-1")
+	if err != nil {
+		return err
+	}
+	existing, err := cat.ListReviews(ctx, []string{mug.ID})
+	if err != nil {
+		return err
+	}
+	if len(existing) == 0 {
+		if _, err := cat.AddReview(ctx, mug.ID, "demo-buyer", "Holds coffee. Last-unit demo SKU."); err != nil {
+			return err
+		}
+		if _, err := cat.AddReview(ctx, mug.ID, "ops-note", "Keep stock at 1 for the concurrent checkout demo."); err != nil {
+			return err
+		}
+	}
 	return nil
 }

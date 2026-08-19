@@ -38,3 +38,16 @@ CREATE TABLE IF NOT EXISTS commerce_order_events (
 );
 
 CREATE INDEX IF NOT EXISTS commerce_order_events_type_idx ON commerce_order_events (event_type);
+
+-- Transactional outbox: written in the same TX as event append, drained to notify.
+CREATE TABLE IF NOT EXISTS commerce_outbox (
+  id TEXT PRIMARY KEY,
+  aggregate_id TEXT NOT NULL,
+  event_type TEXT NOT NULL,
+  payload JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL,
+  published_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS commerce_outbox_unpublished_idx
+  ON commerce_outbox (created_at) WHERE published_at IS NULL;

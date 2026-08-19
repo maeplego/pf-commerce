@@ -72,7 +72,7 @@ func newWorld(t *testing.T, stock int) *world {
 	cat := fakeCatalog{p: order.Product{ID: mugID, SKU: "MUG-1", Name: "Mug", PriceMinor: 1200, Currency: "JPY", Active: true}}
 	st := newFakeStock(stock)
 	pay := order.NewMock()
-	svc := order.NewService(memory.New(), cat, st, pay, clk.Now)
+	svc := order.NewService(memory.New(), cat, st, pay, nil, clk.Now)
 	return &world{ctx: context.Background(), orders: svc, pay: pay, stock: st, siteID: id.New(), mugID: mugID}
 }
 
@@ -148,6 +148,41 @@ func TestConcurrentCheckoutLastUnit(t *testing.T) {
 	if w.stock.avail != 0 {
 		t.Fatalf("avail %d", w.stock.avail)
 	}
+}
+
+func TestPaidCheckoutPublishesOutboxToNotify(t *testing.T) {
+	clk := &clock.Fixed{T: time.Date(2026, 8, 19, 4, 0, 0, 0, time.UTC)}
+	mugID := id.New()
+	cat := fakeCatalog{p: order.Product{ID: mugID, SKU: "MUG-1", Name: "Mug", PriceMinor: 1200, Currency: "JPY", Active: true}}
+	st := newFakeStock(1)
+	pay := order.NewMock()
+	n := &fakeNotify{}
+	svc := order.NewService(memory.New(), cat, st, pay, n, clk.Now)
+	_, _, err := svc.Checkout(context.Background(), order.CheckoutInput{
+		BuyerSub: "alice", IdempotencyKey: id.New(), SiteID: id.New(),
+		Lines: []order.CheckoutLine{{ProductID: mugID, Qty: 1}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(n.mails) != 1 || n.mails[0].Type != "OrderPaid" || n.mails[0].BuyerSub != "alice" {
+		t.Fatalf("%+v", n.mails)
+	}
+	if err := svc.PublishDue(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(n.mails) != 1 {
+		t.Fatalf("second drain must not duplicate mail, got %d", len(n.mails))
+	}
+}
+
+type fakeNotify struct {
+	mails []order.Mail
+}
+
+func (f *fakeNotify) Send(_ context.Context, mail order.Mail) error {
+	f.mails = append(f.mails, mail)
+	return nil
 }
 
 func TestCheckoutIdempotent(t *testing.T) {

@@ -129,3 +129,30 @@ func (s *Store) List(ctx context.Context) ([]catalog.Product, error) {
 	}
 	return out, rows.Err()
 }
+
+func (s *Store) AddReview(ctx context.Context, r catalog.Review) error {
+	_, err := s.pool.Exec(ctx, `INSERT INTO catalog_reviews (id, product_id, author, body, created_at)
+		VALUES ($1,$2,$3,$4,$5)`, r.ID, r.ProductID, r.Author, r.Body, r.CreatedAt)
+	return err
+}
+
+func (s *Store) ListReviews(ctx context.Context, productIDs []string) ([]catalog.Review, error) {
+	if len(productIDs) == 0 {
+		return nil, nil
+	}
+	rows, err := s.pool.Query(ctx, `SELECT id, product_id, author, body, created_at
+		FROM catalog_reviews WHERE product_id = ANY($1) ORDER BY created_at`, productIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []catalog.Review
+	for rows.Next() {
+		var r catalog.Review
+		if err := rows.Scan(&r.ID, &r.ProductID, &r.Author, &r.Body, &r.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}

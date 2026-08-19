@@ -1,0 +1,42 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notify
+  labels:
+    app: commerce-notify
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: commerce-notify
+  template:
+    metadata:
+      labels:
+        app: commerce-notify
+    spec:
+      containers:
+        - name: notify
+          image: pf-commerce-notify:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8105
+              name: http
+          env:
+            - name: COMMERCE_HTTP_PORT
+              value: "8105"
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: http://otel-collector.platform.svc.cluster.local:4318
+            - name: OTEL_SERVICE_NAME
+              value: commerce-notify
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8105
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8105
+            initialDelaySeconds: 10
+            periodSeconds: 10

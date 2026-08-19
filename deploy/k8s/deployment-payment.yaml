@@ -1,0 +1,42 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment
+  labels:
+    app: commerce-payment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: commerce-payment
+  template:
+    metadata:
+      labels:
+        app: commerce-payment
+    spec:
+      containers:
+        - name: payment
+          image: pf-commerce-payment:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8104
+              name: http
+          env:
+            - name: COMMERCE_HTTP_PORT
+              value: "8104"
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: http://otel-collector.platform.svc.cluster.local:4318
+            - name: OTEL_SERVICE_NAME
+              value: commerce-payment
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8104
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8104
+            initialDelaySeconds: 10
+            periodSeconds: 10

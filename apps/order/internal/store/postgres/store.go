@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -241,6 +242,14 @@ func (s *Store) Append(ctx context.Context, streamID string, expectedVersion int
 		if err != nil {
 			return err
 		}
+		if topic, ok := order.NotifyTopic(e.Type); ok {
+			if _, err := tx.Exec(ctx, `INSERT INTO commerce_outbox
+				(id, aggregate_id, event_type, payload, created_at)
+				VALUES ($1,$2,$3,$4,$5)`,
+				id.New(), streamID, topic, raw, e.Time); err != nil {
+				return err
+			}
+		}
 	}
 	rows, err := tx.Query(ctx, `SELECT stream_id, version, event_id, event_type, occurred_at, payload
 		FROM commerce_order_events WHERE stream_id=$1 ORDER BY version`, streamID)
@@ -359,6 +368,36 @@ func upsertProjection(ctx context.Context, tx pgx.Tx, o order.Order) error {
 			(order_id, product_id, sku, name, qty, unit_price_minor, currency)
 			VALUES ($1,$2,$3,$4,$5,$6,$7)`,
 			o.ID, ln.ProductID, ln.SKU, ln.Name, ln.Qty, ln.UnitPriceMinor, ln.Currency); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Store) ListUnpublished(ctx context.Context, limit int) ([]order.OutboxMessage, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := s.pool.Query(ctx, `SELECT id, aggregate_id, event_type, payload, created_at, published_at
+		FROM commerce_outbox WHERE published_at IS NULL ORDER BY created_at LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []order.OutboxMessage
+	for rows.Next() {
+		var m order.OutboxMessage
+		if err := rows.Scan(&m.ID, &m.AggregateID, &m.Type, &m.Payload, &m.CreatedAt, &m.PublishedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) MarkPublished(ctx context.Context, ids []string, at time.Time) error {
+	for _, id := range ids {
+		if _, err := s.pool.Exec(ctx, `UPDATE commerce_outbox SET published_at=$2 WHERE id=$1 AND published_at IS NULL`, id, at); err != nil {
 			return err
 		}
 	}

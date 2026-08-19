@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/portfolio/pf-commerce/apps/inventory/internal/hub"
 	"github.com/portfolio/pf-commerce/apps/inventory/internal/inventory"
 	"github.com/portfolio/pf-commerce/apps/inventory/internal/seed"
 	"github.com/portfolio/pf-commerce/apps/inventory/internal/store/memory"
@@ -54,10 +55,11 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	h := hub.New()
 
 	srv := &http.Server{
 		Addr:              ":" + port,
-		Handler:           web.New(svc, ready).Routes(),
+		Handler:           web.New(svc, h, ready).Routes(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	go func() {

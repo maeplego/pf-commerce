@@ -7,13 +7,21 @@ resources:
   - deployment-catalog.yaml
   - deployment-inventory.yaml
   - deployment-order.yaml
+  - deployment-payment.yaml
+  - deployment-notify.yaml
   - deployment-api.yaml
+  - deployment-bff.yaml
   - deployment-web.yaml
+  - deployment-ops-web.yaml
   - service-catalog.yaml
   - service-inventory.yaml
   - service-order.yaml
+  - service-payment.yaml
+  - service-notify.yaml
   - service-api.yaml
+  - service-bff.yaml
   - service-web.yaml
+  - service-ops-web.yaml
 
 labels:
   - pairs:

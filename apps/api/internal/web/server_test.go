@@ -16,6 +16,8 @@ import (
 	"github.com/portfolio/pf-commerce/apps/api/internal/web"
 	catboot "github.com/portfolio/pf-commerce/apps/catalog/boot"
 	invboot "github.com/portfolio/pf-commerce/apps/inventory/boot"
+	payboot "github.com/portfolio/pf-commerce/apps/payment/boot"
+	ntfboot "github.com/portfolio/pf-commerce/apps/notify/boot"
 	ordboot "github.com/portfolio/pf-commerce/apps/order/boot"
 	"github.com/portfolio/pf-commerce/packages/auth"
 	"github.com/portfolio/pf-commerce/packages/clock"
@@ -38,14 +40,19 @@ func testServer(t *testing.T) *httptest.Server {
 	}
 	invHTTP := httptest.NewServer(invH)
 
-	ordHTTP := httptest.NewServer(ordboot.MemoryHandler(clk.Now, catHTTP.URL, invHTTP.URL, siteID))
+	payHTTP := httptest.NewServer(payboot.MemoryHandler())
+	ntfHTTP := httptest.NewServer(ntfboot.MemoryHandler())
 
-	be := gwclients.New(catHTTP.URL, invHTTP.URL, ordHTTP.URL)
+	ordHTTP := httptest.NewServer(ordboot.MemoryHandler(clk.Now, catHTTP.URL, invHTTP.URL, payHTTP.URL, ntfHTTP.URL, siteID))
+
+	be := gwclients.New(catHTTP.URL, invHTTP.URL, ordHTTP.URL, ntfHTTP.URL)
 	gw := web.New(be, gwcart.NewService(gwmem.New(), clk.Now), siteID, "", auth.New(true), nil)
 	ts := httptest.NewServer(gw.Routes())
 	t.Cleanup(func() {
 		ts.Close()
 		ordHTTP.Close()
+		ntfHTTP.Close()
+		payHTTP.Close()
 		invHTTP.Close()
 		catHTTP.Close()
 	})
@@ -349,5 +356,47 @@ func TestCheckoutFromCart(t *testing.T) {
 	decode(t, res3, &c)
 	if len(c.Items) != 0 {
 		t.Fatalf("cart should clear: %+v", c)
+	}
+}
+
+func TestOpsStockGridAndNotifyAfterPaid(t *testing.T) {
+	ts := testServer(t)
+	res := doJSON(t, http.MethodGet, ts.URL+"/v1/ops/stock", nil, "ops-1", "ops")
+	if res.StatusCode != 200 {
+		b, _ := io.ReadAll(res.Body)
+		t.Fatalf("stock %d %s", res.StatusCode, b)
+	}
+	var grid struct {
+		Items []struct {
+			SKU          string `json:"sku"`
+			AvailableQty int    `json:"availableQty"`
+		} `json:"items"`
+	}
+	decode(t, res, &grid)
+	if len(grid.Items) < 2 {
+		t.Fatalf("grid %+v", grid)
+	}
+	pid := mugID(t, ts)
+	pay := doJSON(t, http.MethodPost, ts.URL+"/v1/checkout", map[string]any{
+		"idempotencyKey": id.New(),
+		"lines":          []map[string]any{{"productId": pid, "qty": 1}},
+	}, "alice", "buyer")
+	if pay.StatusCode != http.StatusCreated {
+		b, _ := io.ReadAll(pay.Body)
+		t.Fatalf("pay %d %s", pay.StatusCode, b)
+	}
+	_ = pay.Body.Close()
+	mail := doJSON(t, http.MethodGet, ts.URL+"/v1/ops/notifications", nil, "ops-1", "ops")
+	if mail.StatusCode != 200 {
+		t.Fatalf("mail %d", mail.StatusCode)
+	}
+	var notes struct {
+		Notifications []struct {
+			Type string `json:"type"`
+		} `json:"notifications"`
+	}
+	decode(t, mail, &notes)
+	if len(notes.Notifications) == 0 || notes.Notifications[0].Type != "OrderPaid" {
+		t.Fatalf("%+v", notes)
 	}
 }

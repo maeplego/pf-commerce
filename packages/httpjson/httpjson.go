@@ -3,6 +3,7 @@ package httpjson
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 )
 
 func Decode(r *http.Request, dest any) error {
@@ -38,8 +39,21 @@ func MountHealth(mux *http.ServeMux, ready func() error) {
 }
 
 func CORS(origin string, next http.Handler) http.Handler {
+	allowed := map[string]struct{}{}
+	for _, o := range strings.Split(origin, ",") {
+		o = strings.TrimSpace(o)
+		if o != "" {
+			allowed[o] = struct{}{}
+		}
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if origin != "" {
+		reqOrigin := r.Header.Get("Origin")
+		if _, ok := allowed[reqOrigin]; ok {
+			w.Header().Set("Access-Control-Allow-Origin", reqOrigin)
+			w.Header().Set("Vary", "Origin")
+			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Idempotency-Key, X-Dev-User-Sub, X-Dev-Role")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
+		} else if origin != "" && !strings.Contains(origin, ",") {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Idempotency-Key, X-Dev-User-Sub, X-Dev-Role")
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")

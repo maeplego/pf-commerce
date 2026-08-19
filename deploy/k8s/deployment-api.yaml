@@ -27,7 +27,7 @@ spec:
             - name: COMMERCE_DEV_AUTH
               value: "true"
             - name: COMMERCE_CORS_ORIGIN
-              value: http://commerce.localhost
+              value: http://commerce.localhost,http://commerce-ops.localhost,http://commerce-bff.localhost
             - name: COMMERCE_DATABASE_URL
               value: postgres://commerce_gateway:dev-commerce-gateway@postgres.platform.svc.cluster.local:5432/commerce_gateway?sslmode=disable
             - name: COMMERCE_CATALOG_URL
@@ -36,6 +36,8 @@ spec:
               value: http://inventory.p06.svc.cluster.local:8102
             - name: COMMERCE_ORDER_URL
               value: http://order.p06.svc.cluster.local:8103
+            - name: COMMERCE_NOTIFY_URL
+              value: http://notify.p06.svc.cluster.local:8105
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
               value: http://otel-collector.platform.svc.cluster.local:4318
             - name: OTEL_SERVICE_NAME

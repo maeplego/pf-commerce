@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bff
+  labels:
+    app: commerce-bff
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: commerce-bff
+  template:
+    metadata:
+      labels:
+        app: commerce-bff
+    spec:
+      containers:
+        - name: bff
+          image: pf-commerce-bff:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8110
+              name: http
+          env:
+            - name: COMMERCE_HTTP_PORT
+              value: "8110"
+            - name: COMMERCE_CATALOG_URL
+              value: http://catalog.p06.svc.cluster.local:8101
+            - name: COMMERCE_INVENTORY_URL
+              value: http://inventory.p06.svc.cluster.local:8102
+            - name: RECOMMEND_API_URL
+              value: http://api.p07.svc.cluster.local:8098
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8110
+            initialDelaySeconds: 8
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8110
+            initialDelaySeconds: 15
+            periodSeconds: 10

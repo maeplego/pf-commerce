@@ -13,6 +13,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <a href="/">カタログ</a>
             {" · "}
             <a href="/demo">在庫1の同時購入デモ</a>
+            {" · "}
+            <span style={{ color: "#888" }}>ops-web は :3010</span>
           </nav>
         </header>
         {children}

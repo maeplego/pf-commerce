@@ -140,3 +140,26 @@ func TestReservationTTLRestoresAvailability(t *testing.T) {
 		t.Fatalf("ttl restore %d", avail)
 	}
 }
+
+func TestListStockCursor(t *testing.T) {
+	ctx, inv, siteID, _, _ := setupInv(t)
+	a := id.New()
+	b := id.New()
+	if _, err := inv.Inbound(ctx, siteID, a, "ops", "seed", 2); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := inv.Inbound(ctx, siteID, b, "ops", "seed", 5); err != nil {
+		t.Fatal(err)
+	}
+	page1, next, err := inv.ListStock(ctx, siteID, "", 1)
+	if err != nil || len(page1) != 1 || next == "" {
+		t.Fatalf("%+v %q %v", page1, next, err)
+	}
+	page2, next2, err := inv.ListStock(ctx, siteID, next, 1)
+	if err != nil || len(page2) != 1 || next2 != "" {
+		t.Fatalf("%+v %q %v", page2, next2, err)
+	}
+	if page1[0].ProductID == page2[0].ProductID {
+		t.Fatal("pages must not overlap")
+	}
+}

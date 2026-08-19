@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"sort"
 	"sync"
 	"time"
 
@@ -191,4 +192,24 @@ func (s *Store) ReserveHeld(_ context.Context, r inventory.Reservation, actorID,
 		OccurredAt:    now,
 	})
 	return nil
+}
+
+func (s *Store) ListBalances(_ context.Context, siteID, afterProductID string, limit int) ([]inventory.Balance, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []inventory.Balance
+	for _, b := range s.balances {
+		if b.SiteID != siteID {
+			continue
+		}
+		if afterProductID != "" && b.ProductID <= afterProductID {
+			continue
+		}
+		out = append(out, b)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ProductID < out[j].ProductID })
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
 }

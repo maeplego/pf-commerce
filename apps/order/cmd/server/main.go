@@ -29,6 +29,8 @@ func main() {
 	dbURL := strings.TrimSpace(os.Getenv("COMMERCE_DATABASE_URL"))
 	catalogURL := strings.TrimSpace(os.Getenv("COMMERCE_CATALOG_URL"))
 	inventoryURL := strings.TrimSpace(os.Getenv("COMMERCE_INVENTORY_URL"))
+	paymentURL := strings.TrimSpace(os.Getenv("COMMERCE_PAYMENT_URL"))
+	notifyURL := strings.TrimSpace(os.Getenv("COMMERCE_NOTIFY_URL"))
 	if catalogURL == "" || inventoryURL == "" {
 		log.Fatal("COMMERCE_CATALOG_URL and COMMERCE_INVENTORY_URL are required")
 	}
@@ -66,7 +68,19 @@ func main() {
 		log.Fatal(err)
 	}
 
-	svc := order.NewService(repo, clients.NewCatalog(catalogURL), clients.NewStock(inventoryURL), order.NewMock(), clk.Now)
+	var pay order.Gateway = order.NewMock()
+	if paymentURL != "" {
+		pay = clients.NewPayment(paymentURL)
+		log.Printf("order payment=http %s", paymentURL)
+	} else {
+		log.Printf("order payment=in-process mock")
+	}
+	var n order.Notifier
+	if notifyURL != "" {
+		n = clients.NewNotify(notifyURL)
+	}
+
+	svc := order.NewService(repo, clients.NewCatalog(catalogURL), clients.NewStock(inventoryURL), pay, n, clk.Now)
 	mw := auth.New(true)
 	srv := &http.Server{
 		Addr:              ":" + port,
@@ -77,6 +91,13 @@ func main() {
 		log.Printf("order listening on %s site=%s (payment mock, no cards)", srv.Addr, siteID)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatal(err)
+		}
+	}()
+	go func() {
+		t := time.NewTicker(2 * time.Second)
+		defer t.Stop()
+		for range t.C {
+			_ = svc.PublishDue(context.Background())
 		}
 	}()
 	stop := make(chan os.Signal, 1)

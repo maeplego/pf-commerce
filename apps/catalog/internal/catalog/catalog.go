@@ -28,11 +28,21 @@ type Product struct {
 	UpdatedAt   time.Time
 }
 
+type Review struct {
+	ID        string
+	ProductID string
+	Author    string
+	Body      string
+	CreatedAt time.Time
+}
+
 type Repository interface {
 	Create(ctx context.Context, p Product) error
 	Get(ctx context.Context, id string) (Product, error)
 	GetBySKU(ctx context.Context, sku string) (Product, error)
 	List(ctx context.Context) ([]Product, error)
+	AddReview(ctx context.Context, r Review) error
+	ListReviews(ctx context.Context, productIDs []string) ([]Review, error)
 }
 
 type Service struct {
@@ -106,4 +116,24 @@ func (s *Service) GetBySKU(ctx context.Context, sku string) (Product, error) {
 
 func (s *Service) List(ctx context.Context) ([]Product, error) {
 	return s.repo.List(ctx)
+}
+
+func (s *Service) AddReview(ctx context.Context, productID, author, body string) (Review, error) {
+	if _, err := s.Get(ctx, productID); err != nil {
+		return Review{}, err
+	}
+	author = strings.TrimSpace(author)
+	body = strings.TrimSpace(body)
+	if author == "" || body == "" {
+		return Review{}, ErrInvalid
+	}
+	r := Review{ID: id.New(), ProductID: productID, Author: author, Body: body, CreatedAt: s.now()}
+	if err := s.repo.AddReview(ctx, r); err != nil {
+		return Review{}, err
+	}
+	return r, nil
+}
+
+func (s *Service) ListReviews(ctx context.Context, productIDs []string) ([]Review, error) {
+	return s.repo.ListReviews(ctx, productIDs)
 }

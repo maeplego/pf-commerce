@@ -26,14 +26,16 @@ type HTTP struct {
 	Catalog   string
 	Inventory string
 	Order     string
+	Notify    string
 	Client    *http.Client
 }
 
-func New(catalog, inventory, orderURL string) *HTTP {
+func New(catalog, inventory, orderURL, notifyURL string) *HTTP {
 	return &HTTP{
 		Catalog:   strings.TrimRight(catalog, "/"),
 		Inventory: strings.TrimRight(inventory, "/"),
 		Order:     strings.TrimRight(orderURL, "/"),
+		Notify:    strings.TrimRight(notifyURL, "/"),
 		Client:    &http.Client{Timeout: 10 * time.Second},
 	}
 }
@@ -105,6 +107,58 @@ func (h *HTTP) SiteID(ctx context.Context) (string, error) {
 
 func (h *HTTP) Inbound(ctx context.Context, raw []byte) (map[string]any, int, []byte, error) {
 	return doJSON[map[string]any](ctx, h.Client, http.MethodPost, h.Inventory+"/v1/inbound", raw, nil)
+}
+
+type StockRow struct {
+	ProductID    string `json:"productId"`
+	Qty          int    `json:"qty"`
+	ReservedQty  int    `json:"reservedQty"`
+	AvailableQty int    `json:"availableQty"`
+	UpdatedAt    string `json:"updatedAt"`
+}
+
+func (h *HTTP) Stock(ctx context.Context, siteID, cursor string, limit int) ([]StockRow, string, error) {
+	u := fmt.Sprintf("%s/v1/stock?siteId=%s&cursor=%s&limit=%d", h.Inventory, siteID, cursor, limit)
+	var body struct {
+		Items      []StockRow `json:"items"`
+		NextCursor string     `json:"nextCursor"`
+	}
+	if err := h.getJSON(ctx, u, &body); err != nil {
+		return nil, "", err
+	}
+	return body.Items, body.NextCursor, nil
+}
+
+func (h *HTTP) Reviews(ctx context.Context, ids []string) ([]map[string]any, error) {
+	var body struct {
+		Reviews []map[string]any `json:"reviews"`
+	}
+	q := h.Catalog + "/v1/reviews?productIds=" + strings.Join(ids, ",")
+	if err := h.getJSON(ctx, q, &body); err != nil {
+		return nil, err
+	}
+	return body.Reviews, nil
+}
+
+func (h *HTTP) Notifications(ctx context.Context) ([]byte, int, error) {
+	if h.Notify == "" {
+		return []byte(`{"notifications":[]}`), 200, nil
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, h.Notify+"/v1/notifications", nil)
+	if err != nil {
+		return nil, 0, err
+	}
+	res, err := h.Client.Do(req)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer res.Body.Close()
+	b, err := io.ReadAll(res.Body)
+	return b, res.StatusCode, err
+}
+
+func (h *HTTP) StockStreamURL() string {
+	return h.Inventory + "/v1/stock/stream"
 }
 
 func (h *HTTP) Checkout(ctx context.Context, raw []byte, header http.Header) ([]byte, int, error) {

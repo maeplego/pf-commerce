@@ -32,6 +32,10 @@ spec:
               value: http://catalog.p06.svc.cluster.local:8101
             - name: COMMERCE_INVENTORY_URL
               value: http://inventory.p06.svc.cluster.local:8102
+            - name: COMMERCE_PAYMENT_URL
+              value: http://payment.p06.svc.cluster.local:8104
+            - name: COMMERCE_NOTIFY_URL
+              value: http://notify.p06.svc.cluster.local:8105
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
               value: http://otel-collector.platform.svc.cluster.local:4318
             - name: OTEL_SERVICE_NAME

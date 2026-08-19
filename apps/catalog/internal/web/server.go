@@ -3,6 +3,7 @@ package web
 import (
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/portfolio/pf-commerce/apps/catalog/internal/catalog"
 	"github.com/portfolio/pf-commerce/packages/httpjson"
@@ -26,6 +27,7 @@ func (s *Server) Routes() http.Handler {
 	httpjson.MountHealth(mux, s.ready)
 	mux.HandleFunc("GET /v1/products", s.list)
 	mux.HandleFunc("GET /v1/products/{id}", s.get)
+	mux.HandleFunc("GET /v1/reviews", s.reviews)
 	mux.HandleFunc("POST /v1/products", s.create)
 	return mux
 }
@@ -68,6 +70,30 @@ func (s *Server) get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpjson.Write(w, http.StatusOK, toJSON(p))
+}
+
+func (s *Server) reviews(w http.ResponseWriter, r *http.Request) {
+	raw := strings.Split(r.URL.Query().Get("productIds"), ",")
+	var ids []string
+	for _, id := range raw {
+		id = strings.TrimSpace(id)
+		if id != "" {
+			ids = append(ids, id)
+		}
+	}
+	list, err := s.cat.ListReviews(r.Context(), ids)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	out := make([]map[string]any, 0, len(list))
+	for _, rv := range list {
+		out = append(out, map[string]any{
+			"id": rv.ID, "productId": rv.ProductID, "author": rv.Author, "body": rv.Body,
+			"createdAt": rv.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+		})
+	}
+	httpjson.Write(w, http.StatusOK, map[string]any{"reviews": out})
 }
 
 func (s *Server) create(w http.ResponseWriter, r *http.Request) {

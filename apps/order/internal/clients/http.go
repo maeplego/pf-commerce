@@ -112,3 +112,79 @@ func (s *StockHTTP) post(ctx context.Context, path string, body any, want int) e
 	}
 	return nil
 }
+
+type PaymentHTTP struct {
+	Base   string
+	Client *http.Client
+}
+
+func NewPayment(base string) *PaymentHTTP {
+	return &PaymentHTTP{Base: strings.TrimRight(base, "/"), Client: &http.Client{Timeout: 8 * time.Second}}
+}
+
+func (p *PaymentHTTP) Charge(ctx context.Context, req order.ChargeRequest) (order.Charge, error) {
+	raw, err := json.Marshal(map[string]any{
+		"idempotencyKey": req.IdempotencyKey, "orderId": req.OrderID, "buyerSub": req.BuyerSub,
+		"amountMinor": req.Amount.Minor, "currency": req.Amount.Currency,
+	})
+	if err != nil {
+		return order.Charge{}, err
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, p.Base+"/v1/charges", bytes.NewReader(raw))
+	if err != nil {
+		return order.Charge{}, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	res, err := p.Client.Do(httpReq)
+	if err != nil {
+		return order.Charge{}, err
+	}
+	defer res.Body.Close()
+	if res.StatusCode == http.StatusConflict {
+		return order.Charge{}, order.ErrDeclined
+	}
+	if res.StatusCode != http.StatusCreated && res.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(res.Body)
+		return order.Charge{}, fmt.Errorf("payment %d: %s", res.StatusCode, b)
+	}
+	var ch struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&ch); err != nil {
+		return order.Charge{}, err
+	}
+	return order.Charge{ID: ch.ID, IdempotencyKey: req.IdempotencyKey, OrderID: req.OrderID, Amount: req.Amount}, nil
+}
+
+type NotifyHTTP struct {
+	Base   string
+	Client *http.Client
+}
+
+func NewNotify(base string) *NotifyHTTP {
+	return &NotifyHTTP{Base: strings.TrimRight(base, "/"), Client: &http.Client{Timeout: 8 * time.Second}}
+}
+
+func (n *NotifyHTTP) Send(ctx context.Context, mail order.Mail) error {
+	raw, err := json.Marshal(map[string]any{
+		"id": mail.ID, "type": mail.Type, "orderId": mail.OrderID, "buyerSub": mail.BuyerSub, "payload": mail.Payload,
+	})
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, n.Base+"/v1/notifications", bytes.NewReader(raw))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	res, err := n.Client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusCreated && res.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(res.Body)
+		return fmt.Errorf("notify %d: %s", res.StatusCode, b)
+	}
+	return nil
+}

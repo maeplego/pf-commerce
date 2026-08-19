@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/portfolio/pf-commerce/apps/api/internal/cart"
 	"github.com/portfolio/pf-commerce/apps/api/internal/clients"
@@ -44,6 +45,9 @@ func (s *Server) Routes() http.Handler {
 	mux.Handle("POST /v1/admin/projections/rebuild", s.auth.Handler(http.HandlerFunc(s.proxyOrderPOST)))
 	mux.Handle("POST /v1/ops/products", s.auth.Handler(http.HandlerFunc(s.opsCreateProduct)))
 	mux.Handle("POST /v1/ops/stock-inbound", s.auth.Handler(http.HandlerFunc(s.opsInbound)))
+	mux.Handle("GET /v1/ops/stock", s.auth.Handler(http.HandlerFunc(s.opsStock)))
+	mux.Handle("GET /v1/ops/notifications", s.auth.Handler(http.HandlerFunc(s.opsNotifications)))
+	mux.HandleFunc("GET /v1/ops/stock/stream", s.opsStockStream)
 	return httpjson.CORS(s.cors, mux)
 }
 
@@ -314,6 +318,106 @@ func (s *Server) opsInbound(w http.ResponseWriter, r *http.Request) {
 	}
 	httpjson.Write(w, st, out)
 }
+
+func (s *Server) opsStock(w http.ResponseWriter, r *http.Request) {
+	u, _ := auth.UserFrom(r.Context())
+	if u.Role != auth.RoleOps {
+		httpjson.WriteError(w, http.StatusForbidden, "forbidden", "ops role required")
+		return
+	}
+	products, err := s.be.ListProducts(r.Context())
+	if err != nil {
+		httpjson.WriteError(w, http.StatusBadGateway, "upstream", err.Error())
+		return
+	}
+	byID := map[string]clients.Product{}
+	for _, p := range products {
+		byID[p.ID] = p
+	}
+	cursor := r.URL.Query().Get("cursor")
+	rows, next, err := s.be.Stock(r.Context(), s.siteID, cursor, 50)
+	if err != nil {
+		httpjson.WriteError(w, http.StatusBadGateway, "upstream", err.Error())
+		return
+	}
+	out := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		item := map[string]any{
+			"productId": row.ProductID, "qty": row.Qty, "reservedQty": row.ReservedQty,
+			"availableQty": row.AvailableQty, "updatedAt": row.UpdatedAt,
+			"sku": "", "name": "",
+		}
+		if p, ok := byID[row.ProductID]; ok {
+			item["sku"] = p.SKU
+			item["name"] = p.Name
+		}
+		out = append(out, item)
+	}
+	httpjson.Write(w, http.StatusOK, map[string]any{"items": out, "nextCursor": next})
+}
+
+func (s *Server) opsNotifications(w http.ResponseWriter, r *http.Request) {
+	u, _ := auth.UserFrom(r.Context())
+	if u.Role != auth.RoleOps {
+		httpjson.WriteError(w, http.StatusForbidden, "forbidden", "ops role required")
+		return
+	}
+	out, st, err := s.be.Notifications(r.Context())
+	if err != nil {
+		httpjson.WriteError(w, http.StatusBadGateway, "upstream", err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(st)
+	_, _ = w.Write(out)
+}
+
+func (s *Server) opsStockStream(w http.ResponseWriter, r *http.Request) {
+	sub := strings.TrimSpace(r.Header.Get("X-Dev-User-Sub"))
+	if sub == "" {
+		sub = strings.TrimSpace(r.URL.Query().Get("devUser"))
+	}
+	role := strings.ToLower(strings.TrimSpace(r.Header.Get("X-Dev-Role")))
+	if role == "" {
+		role = strings.ToLower(strings.TrimSpace(r.URL.Query().Get("devRole")))
+	}
+	if sub == "" || role != string(auth.RoleOps) {
+		httpjson.WriteError(w, http.StatusUnauthorized, "unauthorized", "ops stream requires role")
+		return
+	}
+	fl, ok := w.(http.Flusher)
+	if !ok {
+		httpjson.WriteError(w, http.StatusInternalServerError, "error", "stream unsupported")
+		return
+	}
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, s.be.StockStreamURL(), nil)
+	if err != nil {
+		httpjson.WriteError(w, http.StatusBadGateway, "upstream", err.Error())
+		return
+	}
+	res, err := streamClient.Do(req)
+	if err != nil {
+		httpjson.WriteError(w, http.StatusBadGateway, "upstream", err.Error())
+		return
+	}
+	defer res.Body.Close()
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	buf := make([]byte, 1024)
+	for {
+		n, err := res.Body.Read(buf)
+		if n > 0 {
+			_, _ = w.Write(buf[:n])
+			fl.Flush()
+		}
+		if err != nil {
+			return
+		}
+	}
+}
+
+var streamClient = &http.Client{Timeout: 0}
 
 func cartJSON(c cart.Cart) map[string]any {
 	items := make([]map[string]any, 0, len(c.Items))

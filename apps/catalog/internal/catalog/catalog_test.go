@@ -31,4 +31,12 @@ func TestCreateAndGetBySKU(t *testing.T) {
 	if _, err := svc.Create(ctx, catalog.CreateInput{SKU: "MUG-1", Name: "Dup", PriceMinor: 1, Currency: "JPY"}); err != catalog.ErrConflict {
 		t.Fatalf("dup sku: %v", err)
 	}
+	rv, err := svc.AddReview(ctx, p.ID, "alice", "Nice mug")
+	if err != nil || rv.Body != "Nice mug" {
+		t.Fatalf("%+v %v", rv, err)
+	}
+	list, err := svc.ListReviews(ctx, []string{p.ID})
+	if err != nil || len(list) != 1 {
+		t.Fatalf("%v %v", list, err)
+	}
 }

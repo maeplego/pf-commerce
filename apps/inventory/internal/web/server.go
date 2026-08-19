@@ -3,22 +3,28 @@ package web
 import (
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 
+	"github.com/portfolio/pf-commerce/apps/inventory/internal/hub"
 	"github.com/portfolio/pf-commerce/apps/inventory/internal/inventory"
 	"github.com/portfolio/pf-commerce/packages/httpjson"
 )
 
 type Server struct {
 	inv   *inventory.Service
+	hub   *hub.Hub
 	ready func() error
 }
 
-func New(inv *inventory.Service, ready func() error) *Server {
+func New(inv *inventory.Service, h *hub.Hub, ready func() error) *Server {
 	if ready == nil {
 		ready = func() error { return nil }
 	}
-	return &Server{inv: inv, ready: ready}
+	if h == nil {
+		h = hub.New()
+	}
+	return &Server{inv: inv, hub: h, ready: ready}
 }
 
 func (s *Server) Routes() http.Handler {
@@ -26,6 +32,8 @@ func (s *Server) Routes() http.Handler {
 	httpjson.MountHealth(mux, s.ready)
 	mux.HandleFunc("GET /v1/sites/code/{code}", s.siteByCode)
 	mux.HandleFunc("GET /v1/available", s.available)
+	mux.HandleFunc("GET /v1/stock", s.stock)
+	mux.HandleFunc("GET /v1/stock/stream", s.stream)
 	mux.HandleFunc("POST /v1/inbound", s.inbound)
 	mux.HandleFunc("POST /v1/reserve", s.reserve)
 	mux.HandleFunc("POST /v1/release", s.release)
@@ -62,6 +70,52 @@ func (s *Server) available(w http.ResponseWriter, r *http.Request) {
 	httpjson.Write(w, http.StatusOK, map[string]any{"available": out})
 }
 
+func (s *Server) stock(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	limit, _ := strconv.Atoi(q.Get("limit"))
+	rows, next, err := s.inv.ListStock(r.Context(), q.Get("siteId"), q.Get("cursor"), limit)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	out := make([]map[string]any, 0, len(rows))
+	for _, b := range rows {
+		out = append(out, map[string]any{
+			"productId": b.ProductID, "qty": b.Qty, "reservedQty": b.ReservedQty,
+			"availableQty": b.Available(), "updatedAt": b.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+		})
+	}
+	httpjson.Write(w, http.StatusOK, map[string]any{"items": out, "nextCursor": next})
+}
+
+func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
+	fl, ok := w.(http.Flusher)
+	if !ok {
+		httpjson.WriteError(w, http.StatusInternalServerError, "error", "stream unsupported")
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	ch := s.hub.Subscribe()
+	defer s.hub.Unsubscribe(ch)
+	fl.Flush()
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case raw, ok := <-ch:
+			if !ok {
+				return
+			}
+			_, _ = w.Write([]byte("event: stock.updated\ndata: "))
+			_, _ = w.Write(raw)
+			_, _ = w.Write([]byte("\n\n"))
+			fl.Flush()
+		}
+	}
+}
+
 func (s *Server) inbound(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		SiteID    string `json:"siteId"`
@@ -79,6 +133,10 @@ func (s *Server) inbound(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	s.hub.Publish(hub.Event{
+		ProductID: b.ProductID, Qty: b.Qty, ReservedQty: b.ReservedQty,
+		AvailableQty: b.Available(), Reason: "inbound",
+	})
 	httpjson.Write(w, http.StatusCreated, map[string]any{
 		"productId": b.ProductID, "qty": b.Qty, "reservedQty": b.ReservedQty, "availableQty": b.Available(),
 	})
@@ -101,6 +159,7 @@ func (s *Server) reserve(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	s.publishBalance(r, body.SiteID, body.ProductID, "reserve")
 	httpjson.Write(w, http.StatusCreated, map[string]any{
 		"id": res.ID, "orderId": res.OrderID, "qty": res.Qty, "status": res.Status,
 		"expiresAt": res.ExpiresAt.UTC().Format("2006-01-02T15:04:05Z"),
@@ -138,6 +197,17 @@ func (s *Server) consume(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpjson.Write(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (s *Server) publishBalance(r *http.Request, siteID, productID, reason string) {
+	b, err := s.inv.GetBalance(r.Context(), siteID, productID)
+	if err != nil {
+		return
+	}
+	s.hub.Publish(hub.Event{
+		ProductID: b.ProductID, Qty: b.Qty, ReservedQty: b.ReservedQty,
+		AvailableQty: b.Available(), Reason: reason,
+	})
 }
 
 func writeErr(w http.ResponseWriter, err error) {

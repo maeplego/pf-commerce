@@ -26,7 +26,7 @@ func main() {
 	}
 	ctx := context.Background()
 	clk := clock.System{}
-	be := clients.New(cfg.CatalogURL, cfg.InventoryURL, cfg.OrderURL)
+	be := clients.New(cfg.CatalogURL, cfg.InventoryURL, cfg.OrderURL, cfg.NotifyURL)
 
 	var (
 		carts  cart.Repository

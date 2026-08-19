@@ -101,6 +101,8 @@ type Repository interface {
 
 	// ReserveHeld updates reserved qty, inserts the reservation row, and writes a movement in one transaction.
 	ReserveHeld(ctx context.Context, r Reservation, actorID, reason string, now time.Time) error
+
+	ListBalances(ctx context.Context, siteID, afterProductID string, limit int) ([]Balance, error)
 }
 
 type Service struct {
@@ -140,7 +142,7 @@ func (s *Service) SiteByCode(ctx context.Context, code string) (Site, error) {
 }
 
 func (s *Service) Available(ctx context.Context, siteID, productID string) (int, error) {
-	b, err := s.repo.GetBalance(ctx, siteID, productID)
+	b, err := s.GetBalance(ctx, siteID, productID)
 	if err == ErrNotFound {
 		return 0, nil
 	}
@@ -148,6 +150,10 @@ func (s *Service) Available(ctx context.Context, siteID, productID string) (int,
 		return 0, err
 	}
 	return b.Available(), nil
+}
+
+func (s *Service) GetBalance(ctx context.Context, siteID, productID string) (Balance, error) {
+	return s.repo.GetBalance(ctx, siteID, productID)
 }
 
 func (s *Service) Inbound(ctx context.Context, siteID, productID, actorID, reason string, qty int) (Balance, error) {
@@ -287,4 +293,23 @@ func (s *Service) releaseOne(ctx context.Context, r Reservation, to ReservationS
 		ReservationID: r.ID,
 		OccurredAt:    now,
 	})
+}
+
+func (s *Service) ListStock(ctx context.Context, siteID, cursor string, limit int) ([]Balance, string, error) {
+	if err := id.Parse(siteID); err != nil {
+		return nil, "", ErrInvalid
+	}
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	rows, err := s.repo.ListBalances(ctx, siteID, cursor, limit+1)
+	if err != nil {
+		return nil, "", err
+	}
+	next := ""
+	if len(rows) > limit {
+		next = rows[limit-1].ProductID
+		rows = rows[:limit]
+	}
+	return rows, next, nil
 }

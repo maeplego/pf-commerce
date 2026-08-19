@@ -14,6 +14,7 @@ type Config struct {
 	CatalogURL   string
 	InventoryURL string
 	OrderURL     string
+	NotifyURL    string
 }
 
 func FromEnv() (Config, error) {
@@ -30,9 +31,10 @@ func FromEnv() (Config, error) {
 		CatalogURL:   strings.TrimSpace(os.Getenv("COMMERCE_CATALOG_URL")),
 		InventoryURL: strings.TrimSpace(os.Getenv("COMMERCE_INVENTORY_URL")),
 		OrderURL:     strings.TrimSpace(os.Getenv("COMMERCE_ORDER_URL")),
+		NotifyURL:    strings.TrimSpace(os.Getenv("COMMERCE_NOTIFY_URL")),
 	}
 	if cfg.CORSOrigin == "" {
-		cfg.CORSOrigin = "http://localhost:3009"
+		cfg.CORSOrigin = "http://localhost:3009,http://localhost:3010,http://localhost:8110"
 	}
 	if !cfg.DevAuth {
 		return cfg, fmt.Errorf("COMMERCE_DEV_AUTH=true is required in this slice (P01 OIDC is not wired yet)")

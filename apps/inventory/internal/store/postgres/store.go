@@ -245,3 +245,27 @@ func (s *Store) ReserveHeld(ctx context.Context, r inventory.Reservation, actorI
 	}
 	return tx.Commit(ctx)
 }
+
+func (s *Store) ListBalances(ctx context.Context, siteID, afterProductID string, limit int) ([]inventory.Balance, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := s.pool.Query(ctx, `SELECT site_id, product_id, qty, reserved_qty, version, updated_at
+		FROM inventory_stock_balances
+		WHERE site_id=$1 AND product_id > $2
+		ORDER BY product_id
+		LIMIT $3`, siteID, afterProductID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []inventory.Balance
+	for rows.Next() {
+		b, err := scanBalance(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, b)
+	}
+	return out, rows.Err()
+}

@@ -28,6 +28,8 @@ spec:
               value: "0.0.0.0"
             - name: NEXT_PUBLIC_COMMERCE_API_URL
               value: http://commerce-api.localhost
+            - name: NEXT_PUBLIC_COMMERCE_BFF_URL
+              value: http://commerce-bff.localhost
           readinessProbe:
             httpGet:
               path: /

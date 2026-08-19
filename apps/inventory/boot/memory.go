@@ -20,5 +20,5 @@ func MemoryHandler(now func() time.Time, catalogURL string) (http.Handler, strin
 	if err != nil {
 		return nil, "", err
 	}
-	return web.New(svc, nil).Routes(), site.ID, nil
+	return web.New(svc, nil, nil).Routes(), site.ID, nil
 }

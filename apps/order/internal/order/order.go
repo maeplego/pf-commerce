@@ -93,19 +93,59 @@ type StockClient interface {
 	ConsumeOrder(ctx context.Context, orderID, actorID string) error
 }
 
+type Notifier interface {
+	Send(ctx context.Context, mail Mail) error
+}
+
+type Mail struct {
+	ID       string
+	Type     string
+	OrderID  string
+	BuyerSub string
+	Payload  string
+}
+
 type Service struct {
 	store   Persistence
 	catalog CatalogClient
 	stock   StockClient
 	pay     Gateway
+	notify  Notifier
 	now     func() time.Time
 }
 
-func NewService(store Persistence, cat CatalogClient, stock StockClient, pay Gateway, now func() time.Time) *Service {
+func NewService(store Persistence, cat CatalogClient, stock StockClient, pay Gateway, notify Notifier, now func() time.Time) *Service {
 	if now == nil {
 		now = func() time.Time { return time.Now().UTC() }
 	}
-	return &Service{store: store, catalog: cat, stock: stock, pay: pay, now: now}
+	return &Service{store: store, catalog: cat, stock: stock, pay: pay, notify: notify, now: now}
+}
+
+func (s *Service) PublishDue(ctx context.Context) error {
+	if s.notify == nil {
+		return nil
+	}
+	msgs, err := s.store.ListUnpublished(ctx, 50)
+	if err != nil {
+		return err
+	}
+	var done []string
+	for _, m := range msgs {
+		o, err := s.store.Get(ctx, m.AggregateID)
+		if err != nil {
+			return err
+		}
+		if err := s.notify.Send(ctx, Mail{
+			ID: m.ID, Type: m.Type, OrderID: o.ID, BuyerSub: o.BuyerSub, Payload: string(m.Payload),
+		}); err != nil {
+			if markErr := s.store.MarkPublished(ctx, done, s.now()); markErr != nil {
+				return markErr
+			}
+			return err
+		}
+		done = append(done, m.ID)
+	}
+	return s.store.MarkPublished(ctx, done, s.now())
 }
 
 func (s *Service) Get(ctx context.Context, orderID, actorSub string, ops bool) (Order, error) {
@@ -157,6 +197,12 @@ func (s *Service) Ship(ctx context.Context, orderID, actorSub string, ops bool) 
 }
 
 func (s *Service) Checkout(ctx context.Context, in CheckoutInput) (Order, bool, error) {
+	o, created, err := s.checkout(ctx, in)
+	_ = s.PublishDue(ctx)
+	return o, created, err
+}
+
+func (s *Service) checkout(ctx context.Context, in CheckoutInput) (Order, bool, error) {
 	if in.BuyerSub == "" || in.IdempotencyKey == "" || in.SiteID == "" {
 		return Order{}, false, ErrInvalid
 	}

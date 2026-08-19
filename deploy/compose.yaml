@@ -51,6 +51,8 @@ services:
       COMMERCE_DATABASE_URL: postgres://commerce:commerce@commerce-db:5432/orders?sslmode=disable
       COMMERCE_CATALOG_URL: http://commerce-catalog:8101
       COMMERCE_INVENTORY_URL: http://commerce-inventory:8102
+      COMMERCE_PAYMENT_URL: http://commerce-payment:8104
+      COMMERCE_NOTIFY_URL: http://commerce-notify:8105
     depends_on:
       commerce-db:
         condition: service_healthy
@@ -58,6 +60,39 @@ services:
         condition: service_started
       commerce-inventory:
         condition: service_started
+      commerce-payment:
+        condition: service_started
+      commerce-notify:
+        condition: service_started
+
+  commerce-payment:
+    build:
+      context: ..
+      dockerfile: apps/payment/Dockerfile
+    environment:
+      COMMERCE_HTTP_PORT: "8104"
+
+  commerce-notify:
+    build:
+      context: ..
+      dockerfile: apps/notify/Dockerfile
+    environment:
+      COMMERCE_HTTP_PORT: "8105"
+
+  commerce-bff:
+    build:
+      context: ../apps/bff
+      dockerfile: Dockerfile
+    environment:
+      COMMERCE_HTTP_PORT: "8110"
+      COMMERCE_CATALOG_URL: http://commerce-catalog:8101
+      COMMERCE_INVENTORY_URL: http://commerce-inventory:8102
+      RECOMMEND_API_URL: ${RECOMMEND_API_URL:-}
+    ports:
+      - "8110:8110"
+    depends_on:
+      - commerce-catalog
+      - commerce-inventory
 
   commerce-api:
     build:
@@ -66,11 +101,12 @@ services:
     environment:
       COMMERCE_HTTP_PORT: "8099"
       COMMERCE_DEV_AUTH: ${COMMERCE_DEV_AUTH:-true}
-      COMMERCE_CORS_ORIGIN: ${COMMERCE_CORS_ORIGIN:-http://localhost:3009}
+      COMMERCE_CORS_ORIGIN: ${COMMERCE_CORS_ORIGIN:-http://localhost:3009,http://localhost:3010,http://localhost:8110}
       COMMERCE_DATABASE_URL: postgres://commerce:commerce@commerce-db:5432/gateway?sslmode=disable
       COMMERCE_CATALOG_URL: http://commerce-catalog:8101
       COMMERCE_INVENTORY_URL: http://commerce-inventory:8102
       COMMERCE_ORDER_URL: http://commerce-order:8103
+      COMMERCE_NOTIFY_URL: http://commerce-notify:8105
     ports:
       - "8099:8099"
     depends_on:
@@ -82,6 +118,8 @@ services:
         condition: service_started
       commerce-order:
         condition: service_started
+      commerce-notify:
+        condition: service_started
 
   commerce-storefront:
     build:
@@ -89,10 +127,26 @@ services:
       dockerfile: Dockerfile
       args:
         NEXT_PUBLIC_COMMERCE_API_URL: ${NEXT_PUBLIC_COMMERCE_API_URL:-http://localhost:8099}
+        NEXT_PUBLIC_COMMERCE_BFF_URL: ${NEXT_PUBLIC_COMMERCE_BFF_URL:-http://localhost:8110}
+    environment:
+      NEXT_PUBLIC_COMMERCE_API_URL: ${NEXT_PUBLIC_COMMERCE_API_URL:-http://localhost:8099}
+      NEXT_PUBLIC_COMMERCE_BFF_URL: ${NEXT_PUBLIC_COMMERCE_BFF_URL:-http://localhost:8110}
+    ports:
+      - "3009:3009"
+    depends_on:
+      - commerce-api
+      - commerce-bff
+
+  commerce-ops-web:
+    build:
+      context: ../apps/ops-web
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_COMMERCE_API_URL: ${NEXT_PUBLIC_COMMERCE_API_URL:-http://localhost:8099}
     environment:
       NEXT_PUBLIC_COMMERCE_API_URL: ${NEXT_PUBLIC_COMMERCE_API_URL:-http://localhost:8099}
     ports:
-      - "3009:3009"
+      - "3010:3010"
     depends_on:
       - commerce-api
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/portfolio/pf-commerce/apps/order/internal/order"
 	"github.com/portfolio/pf-commerce/packages/id"
@@ -14,6 +15,7 @@ type Store struct {
 	mu     sync.Mutex
 	orders map[string]order.Order
 	events map[string][]order.RecordedEvent
+	outbox []order.OutboxMessage
 }
 
 func New() *Store {
@@ -55,6 +57,11 @@ func (s *Store) Append(_ context.Context, streamID string, expectedVersion int, 
 			}
 		}
 		cur = append(cur, rec)
+		if topic, ok := order.NotifyTopic(rec.Type); ok {
+			s.outbox = append(s.outbox, order.OutboxMessage{
+				ID: rec.ID, AggregateID: streamID, Type: topic, Payload: raw, CreatedAt: rec.Time,
+			})
+		}
 	}
 	s.events[streamID] = cur
 	o, err := order.Fold(cur)
@@ -168,4 +175,35 @@ func (s *Store) Update(_ context.Context, o order.Order) error {
 func cloneOrder(o order.Order) order.Order {
 	o.Lines = append([]order.Line{}, o.Lines...)
 	return o
+}
+
+func (s *Store) ListUnpublished(_ context.Context, limit int) ([]order.OutboxMessage, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []order.OutboxMessage
+	for _, m := range s.outbox {
+		if m.PublishedAt == nil {
+			out = append(out, m)
+			if limit > 0 && len(out) >= limit {
+				break
+			}
+		}
+	}
+	return out, nil
+}
+
+func (s *Store) MarkPublished(_ context.Context, ids []string, at time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	want := map[string]struct{}{}
+	for _, id := range ids {
+		want[id] = struct{}{}
+	}
+	for i, m := range s.outbox {
+		if _, ok := want[m.ID]; ok {
+			t := at
+			s.outbox[i].PublishedAt = &t
+		}
+	}
+	return nil
 }

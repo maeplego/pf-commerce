@@ -43,9 +43,24 @@ type EventStore interface {
 	RebuildProjections(ctx context.Context) error
 }
 
+type OutboxMessage struct {
+	ID          string
+	AggregateID string
+	Type        string
+	Payload     json.RawMessage
+	CreatedAt   time.Time
+	PublishedAt *time.Time
+}
+
+type OutboxStore interface {
+	ListUnpublished(ctx context.Context, limit int) ([]OutboxMessage, error)
+	MarkPublished(ctx context.Context, ids []string, at time.Time) error
+}
+
 type Persistence interface {
 	Repository
 	EventStore
+	OutboxStore
 }
 
 type OrderCreatedData struct {
@@ -200,4 +215,16 @@ func DecideShip(o Order, now time.Time) ([]NewEvent, error) {
 		return nil, ErrInvalidTransition
 	}
 	return []NewEvent{{Type: EventOrderShipped, Time: now, Data: map[string]any{}}}, nil
+}
+
+// NotifyTopic is the mail type for outbox rows. PaymentFailed is covered by OrderCancelled.
+func NotifyTopic(t EventType) (string, bool) {
+	switch t {
+	case EventPaymentRecorded:
+		return "OrderPaid", true
+	case EventOrderCancelled:
+		return "OrderCancelled", true
+	default:
+		return "", false
+	}
 }
