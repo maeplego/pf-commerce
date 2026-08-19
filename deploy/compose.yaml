@@ -1,0 +1,47 @@
+services:
+  commerce-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: commerce
+      POSTGRES_PASSWORD: commerce
+      POSTGRES_DB: commerce
+    ports:
+      - "5438:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U commerce -d commerce"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - commerce-pg:/var/lib/postgresql/data
+
+  commerce-api:
+    build:
+      context: ../apps/api
+      dockerfile: Dockerfile
+    environment:
+      COMMERCE_HTTP_PORT: "8098"
+      COMMERCE_DEV_AUTH: ${COMMERCE_DEV_AUTH:-true}
+      COMMERCE_CORS_ORIGIN: ${COMMERCE_CORS_ORIGIN:-http://localhost:3008}
+      COMMERCE_DATABASE_URL: ${COMMERCE_DATABASE_URL:-postgres://commerce:commerce@commerce-db:5432/commerce?sslmode=disable}
+    ports:
+      - "8098:8098"
+    depends_on:
+      commerce-db:
+        condition: service_healthy
+
+  commerce-storefront:
+    build:
+      context: ../apps/storefront
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_COMMERCE_API_URL: ${NEXT_PUBLIC_COMMERCE_API_URL:-http://localhost:8098}
+    environment:
+      NEXT_PUBLIC_COMMERCE_API_URL: ${NEXT_PUBLIC_COMMERCE_API_URL:-http://localhost:8098}
+    ports:
+      - "3008:3008"
+    depends_on:
+      - commerce-api
+
+volumes:
+  commerce-pg:
