@@ -1,0 +1,68 @@
+# Publishes review-pack images. See pf-cloud-k8s/docs/ghcr.md.
+name: push-ghcr
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-push:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: pf-commerce-catalog
+            context: .
+            file: apps/catalog/Dockerfile
+          - image: pf-commerce-inventory
+            context: .
+            file: apps/inventory/Dockerfile
+          - image: pf-commerce-order
+            context: .
+            file: apps/order/Dockerfile
+          - image: pf-commerce-payment
+            context: .
+            file: apps/payment/Dockerfile
+          - image: pf-commerce-notify
+            context: .
+            file: apps/notify/Dockerfile
+          - image: pf-commerce-api
+            context: .
+            file: apps/api/Dockerfile
+          - image: pf-commerce-bff
+            context: apps/bff
+            file: Dockerfile
+          - image: pf-commerce-storefront
+            context: apps/storefront
+            file: Dockerfile
+            build_args: |
+              NEXT_PUBLIC_COMMERCE_API_URL=http://localhost:8099
+              NEXT_PUBLIC_COMMERCE_BFF_URL=http://localhost:8110
+          - image: pf-commerce-ops-web
+            context: apps/ops-web
+            file: Dockerfile
+            build_args: |
+              NEXT_PUBLIC_COMMERCE_API_URL=http://localhost:8099
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          push: true
+          build-args: ${{ matrix.build_args }}
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}:${{ github.sha }}
+            ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}:latest
