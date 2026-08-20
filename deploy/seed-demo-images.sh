@@ -7,7 +7,7 @@ set -eu
 ROOT="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)"
 ASSETS="$ROOT/demo-assets"
 ENDPOINT="${MEDIA_S3_ENDPOINT:-http://localhost:3900}"
-BUCKET="${MEDIA_S3_BUCKET:-portfolio-demo}"
+BUCKET="${MEDIA_S3_BUCKET:-media}"
 REGION="${MEDIA_S3_REGION:-garage}"
 
 if [ ! -d "$ASSETS" ]; then
