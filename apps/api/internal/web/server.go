@@ -2,6 +2,7 @@ package web
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -11,22 +12,27 @@ import (
 	"github.com/portfolio/pf-commerce/apps/api/internal/clients"
 	"github.com/portfolio/pf-commerce/packages/auth"
 	"github.com/portfolio/pf-commerce/packages/httpjson"
+	"github.com/portfolio/pf-commerce/packages/recommendevents"
 )
 
 type Server struct {
-	be     *clients.HTTP
-	carts  *cart.Service
-	siteID string
-	cors   string
-	auth   *auth.Middleware
-	ready  func() error
+	be          *clients.HTTP
+	carts       *cart.Service
+	siteID      string
+	cors        string
+	auth        *auth.Middleware
+	recommendURL string
+	ready       func() error
 }
 
-func New(be *clients.HTTP, carts *cart.Service, siteID, cors string, mw *auth.Middleware, ready func() error) *Server {
+func New(be *clients.HTTP, carts *cart.Service, siteID, cors, recommendURL string, mw *auth.Middleware, ready func() error) *Server {
 	if ready == nil {
 		ready = func() error { return nil }
 	}
-	return &Server{be: be, carts: carts, siteID: siteID, cors: cors, auth: mw, ready: ready}
+	return &Server{
+		be: be, carts: carts, siteID: siteID, cors: cors, auth: mw,
+		recommendURL: strings.TrimSpace(recommendURL), ready: ready,
+	}
 }
 
 func (s *Server) Routes() http.Handler {
@@ -226,12 +232,25 @@ func (s *Server) checkout(w http.ResponseWriter, r *http.Request) {
 		httpjson.WriteError(w, http.StatusBadGateway, "upstream", err.Error())
 		return
 	}
-	if useCart && st == http.StatusCreated {
+	if st == http.StatusCreated || st == http.StatusOK {
 		var o struct {
 			Status string `json:"status"`
+			Lines  []struct {
+				SKU string `json:"sku"`
+				Qty int    `json:"qty"`
+			} `json:"lines"`
 		}
 		if json.Unmarshal(out, &o) == nil && o.Status == "paid" {
-			_ = s.carts.Clear(r.Context(), u.Sub)
+			if useCart {
+				_ = s.carts.Clear(r.Context(), u.Sub)
+			}
+			if s.recommendURL != "" && len(o.Lines) > 0 {
+				lines := make([]recommendevents.Line, 0, len(o.Lines))
+				for _, ln := range o.Lines {
+					lines = append(lines, recommendevents.Line{SKU: ln.SKU, Qty: ln.Qty})
+				}
+				go recommendevents.PostPurchase(context.Background(), s.recommendURL, u.Sub, lines, nil)
+			}
 		}
 	}
 	w.Header().Set("Content-Type", "application/json")

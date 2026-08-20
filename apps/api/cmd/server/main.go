@@ -65,7 +65,7 @@ func main() {
 	}
 
 	mw := auth.New(cfg.DevAuth, cfg.OidcIssuer, cfg.OidcInternalBase)
-	handler := web.New(be, cart.NewService(carts, clk.Now), siteID, cfg.CORSOrigin, mw, ready).Routes()
+	handler := web.New(be, cart.NewService(carts, clk.Now), siteID, cfg.CORSOrigin, cfg.RecommendAPIURL, mw, ready).Routes()
 	srv := &http.Server{Addr: cfg.HTTPAddr, Handler: handler, ReadHeaderTimeout: 10 * time.Second}
 	go func() {
 		log.Printf("commerce gateway listening on %s site=%s", cfg.HTTPAddr, siteID)

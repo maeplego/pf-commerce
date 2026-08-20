@@ -35,6 +35,7 @@ services:
     environment:
       COMMERCE_HTTP_PORT: "8101"
       COMMERCE_DATABASE_URL: postgres://commerce:commerce@commerce-db:5432/catalog?sslmode=disable
+      MEDIA_PUBLIC_BASE: ${MEDIA_PUBLIC_BASE:-}
     depends_on:
       commerce-db-init:
         condition: service_completed_successfully
@@ -120,6 +121,7 @@ services:
       COMMERCE_INVENTORY_URL: http://commerce-inventory:8102
       COMMERCE_ORDER_URL: http://commerce-order:8103
       COMMERCE_NOTIFY_URL: http://commerce-notify:8105
+      RECOMMEND_API_URL: ${RECOMMEND_API_URL:-}
     ports:
       - "8099:8099"
     depends_on:

@@ -46,7 +46,7 @@ func testServer(t *testing.T) *httptest.Server {
 	ordHTTP := httptest.NewServer(ordboot.MemoryHandler(clk.Now, catHTTP.URL, invHTTP.URL, payHTTP.URL, ntfHTTP.URL, siteID))
 
 	be := gwclients.New(catHTTP.URL, invHTTP.URL, ordHTTP.URL, ntfHTTP.URL)
-	gw := web.New(be, gwcart.NewService(gwmem.New(), clk.Now), siteID, "", auth.New(true, "", ""), nil)
+	gw := web.New(be, gwcart.NewService(gwmem.New(), clk.Now), siteID, "", "", auth.New(true, "", ""), nil)
 	ts := httptest.NewServer(gw.Routes())
 	t.Cleanup(func() {
 		ts.Close()

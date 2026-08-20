@@ -18,6 +18,7 @@ type Config struct {
 	InventoryURL     string
 	OrderURL         string
 	NotifyURL        string
+	RecommendAPIURL  string
 }
 
 func FromEnv() (Config, error) {
@@ -39,6 +40,7 @@ func FromEnv() (Config, error) {
 		InventoryURL:     strings.TrimSpace(os.Getenv("COMMERCE_INVENTORY_URL")),
 		OrderURL:         strings.TrimSpace(os.Getenv("COMMERCE_ORDER_URL")),
 		NotifyURL:        strings.TrimSpace(os.Getenv("COMMERCE_NOTIFY_URL")),
+		RecommendAPIURL:  strings.TrimSpace(os.Getenv("RECOMMEND_API_URL")),
 	}
 	if cfg.OidcInternalBase == "" {
 		cfg.OidcInternalBase = issuer
