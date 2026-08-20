@@ -162,6 +162,17 @@ func (s *Store) ListByBuyer(_ context.Context, buyerSub string) ([]order.Order, 
 	return out, nil
 }
 
+func (s *Store) ListAll(_ context.Context) ([]order.Order, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]order.Order, 0, len(s.orders))
+	for _, o := range s.orders {
+		out = append(out, cloneOrder(o))
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
+	return out, nil
+}
+
 func (s *Store) Update(_ context.Context, o order.Order) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

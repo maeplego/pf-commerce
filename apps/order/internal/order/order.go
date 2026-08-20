@@ -59,6 +59,7 @@ type Repository interface {
 	Get(ctx context.Context, id string) (Order, error)
 	GetByIdempotency(ctx context.Context, buyerSub, key string) (Order, error)
 	ListByBuyer(ctx context.Context, buyerSub string) ([]Order, error)
+	ListAll(ctx context.Context) ([]Order, error)
 	Update(ctx context.Context, o Order) error
 }
 

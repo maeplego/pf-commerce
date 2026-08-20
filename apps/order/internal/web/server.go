@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/portfolio/pf-commerce/apps/order/internal/order"
 	"github.com/portfolio/pf-commerce/packages/auth"
@@ -35,6 +36,7 @@ func (s *Server) Routes() http.Handler {
 	mux.Handle("POST /v1/orders/{id}/ship", s.auth.Handler(http.HandlerFunc(s.ship)))
 	mux.Handle("GET /v1/orders/{id}", s.auth.Handler(http.HandlerFunc(s.get)))
 	mux.Handle("POST /v1/admin/projections/rebuild", s.auth.Handler(http.HandlerFunc(s.rebuild)))
+	mux.Handle("GET /v1/ops/exports/orders", s.auth.Handler(http.HandlerFunc(s.exportOrders)))
 	return mux
 }
 
@@ -147,6 +149,29 @@ func (s *Server) rebuild(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpjson.Write(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (s *Server) exportOrders(w http.ResponseWriter, r *http.Request) {
+	u, _ := auth.UserFrom(r.Context())
+	if u.Role != auth.RoleOps {
+		httpjson.WriteError(w, http.StatusForbidden, "forbidden", "ops role required")
+		return
+	}
+	raw := strings.TrimSpace(r.URL.Query().Get("date"))
+	if raw == "" {
+		raw = time.Now().UTC().Format("2006-01-02")
+	}
+	day, err := time.Parse("2006-01-02", raw)
+	if err != nil {
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid", "date must be YYYY-MM-DD")
+		return
+	}
+	lines, err := s.orders.ExportLines(r.Context(), day)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	httpjson.Write(w, http.StatusOK, map[string]any{"date": raw, "lines": lines, "pii": "buyerOpaque only"})
 }
 
 func OrderJSON(o order.Order) map[string]any { return orderJSON(o) }

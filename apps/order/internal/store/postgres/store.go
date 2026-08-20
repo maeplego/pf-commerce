@@ -158,6 +158,34 @@ func (s *Store) ListByBuyer(ctx context.Context, buyerSub string) ([]order.Order
 	return out, nil
 }
 
+func (s *Store) ListAll(ctx context.Context) ([]order.Order, error) {
+	rows, err := s.pool.Query(ctx, `SELECT id, buyer_sub, status, cancel_reason, amount_minor, currency, idempotency_key, payment_id, created_at, updated_at
+		FROM commerce_orders ORDER BY created_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []order.Order
+	for rows.Next() {
+		o, err := scanOrder(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, o)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for i := range out {
+		lines, err := s.loadLines(ctx, out[i].ID)
+		if err != nil {
+			return nil, err
+		}
+		out[i].Lines = lines
+	}
+	return out, nil
+}
+
 func (s *Store) Update(ctx context.Context, o order.Order) error {
 	tag, err := s.pool.Exec(ctx, `UPDATE commerce_orders SET status=$2, cancel_reason=$3, payment_id=$4, updated_at=$5 WHERE id=$1`,
 		o.ID, o.Status, o.CancelReason, o.PaymentID, o.UpdatedAt)
