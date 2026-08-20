@@ -64,7 +64,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	mw := auth.New(cfg.DevAuth)
+	mw := auth.New(cfg.DevAuth, cfg.OidcIssuer, cfg.OidcInternalBase)
 	handler := web.New(be, cart.NewService(carts, clk.Now), siteID, cfg.CORSOrigin, mw, ready).Routes()
 	srv := &http.Server{Addr: cfg.HTTPAddr, Handler: handler, ReadHeaderTimeout: 10 * time.Second}
 	go func() {

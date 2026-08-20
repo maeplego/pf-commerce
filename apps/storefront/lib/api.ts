@@ -80,8 +80,9 @@ export async function getProduct(id: string): Promise<Product> {
 }
 
 export async function checkout(user: string, productId: string, qty: number, key: string) {
-  const res = await fetch(`${apiBase}/v1/checkout`, {
+  const res = await fetch(`/api/commerce/v1/checkout`, {
     method: "POST",
+    credentials: "same-origin",
     headers: {
       "Content-Type": "application/json",
       "X-Dev-User-Sub": user,

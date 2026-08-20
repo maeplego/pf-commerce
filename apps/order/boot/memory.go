@@ -24,5 +24,5 @@ func MemoryHandler(now func() time.Time, catalogURL, inventoryURL, paymentURL, n
 		n = clients.NewNotify(notifyURL)
 	}
 	svc := order.NewService(memory.New(), clients.NewCatalog(catalogURL), clients.NewStock(inventoryURL), pay, n, now)
-	return web.New(svc, siteID, auth.New(true), nil).Routes()
+	return web.New(svc, siteID, auth.New(true, "", ""), nil).Routes()
 }

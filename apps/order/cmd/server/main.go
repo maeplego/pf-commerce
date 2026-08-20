@@ -35,8 +35,13 @@ func main() {
 		log.Fatal("COMMERCE_CATALOG_URL and COMMERCE_INVENTORY_URL are required")
 	}
 	devAuth := strings.EqualFold(os.Getenv("COMMERCE_DEV_AUTH"), "true") || os.Getenv("COMMERCE_DEV_AUTH") == "1"
-	if !devAuth {
-		log.Fatal("COMMERCE_DEV_AUTH=true is required in this slice (P01 OIDC is not wired yet)")
+	issuer := strings.TrimSpace(os.Getenv("OIDC_ISSUER"))
+	internalBase := strings.TrimSpace(os.Getenv("OIDC_INTERNAL_BASE"))
+	if internalBase == "" {
+		internalBase = issuer
+	}
+	if !devAuth && issuer == "" {
+		log.Fatal("set COMMERCE_DEV_AUTH=true or configure OIDC_ISSUER")
 	}
 
 	ctx := context.Background()
@@ -81,7 +86,7 @@ func main() {
 	}
 
 	svc := order.NewService(repo, clients.NewCatalog(catalogURL), clients.NewStock(inventoryURL), pay, n, clk.Now)
-	mw := auth.New(true)
+	mw := auth.New(devAuth, issuer, internalBase)
 	srv := &http.Server{
 		Addr:              ":" + port,
 		Handler:           web.New(svc, siteID, mw, ready).Routes(),
