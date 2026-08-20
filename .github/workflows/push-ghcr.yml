@@ -37,16 +37,16 @@ jobs:
             file: apps/api/Dockerfile
           - image: pf-commerce-bff
             context: apps/bff
-            file: Dockerfile
+            file: apps/bff/Dockerfile
           - image: pf-commerce-storefront
             context: apps/storefront
-            file: Dockerfile
+            file: apps/storefront/Dockerfile
             build_args: |
               NEXT_PUBLIC_COMMERCE_API_URL=http://localhost:8099
               NEXT_PUBLIC_COMMERCE_BFF_URL=http://localhost:8110
           - image: pf-commerce-ops-web
             context: apps/ops-web
-            file: Dockerfile
+            file: apps/ops-web/Dockerfile
             build_args: |
               NEXT_PUBLIC_COMMERCE_API_URL=http://localhost:8099
     steps:

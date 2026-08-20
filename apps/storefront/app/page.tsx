@@ -16,44 +16,46 @@ export default function HomePage() {
       .catch(() => setSlot(null));
   }, []);
   return (
-    <main>
-      <h1>カタログ</h1>
-      <p style={{ color: "#555" }}>
-        金額は整数（円）。画像は URL 文字列（P03 未接続）。決済はモックでカード番号は扱いません。
-      </p>
-      {err ? <p>{err}</p> : null}
+    <>
+      <section className="hero">
+        <h1 className="page-title">カタログ</h1>
+        <p className="page-lead">
+          金額は整数（円）。画像は URL 文字列（P03 未接続）。決済はモックでカード番号は扱いません。
+        </p>
+      </section>
+      {err ? <p className="error">{err}</p> : null}
       {slot?.products?.length ? (
         <section>
-          <h2>おすすめ</h2>
-          <p style={{ color: "#666" }}>
+          <h2 className="section-title">おすすめ</h2>
+          <p className="muted">
             source: {slot.source}
             {slot.fallback ? " (fallback)" : ""}
           </p>
-          <ul style={{ listStyle: "none", padding: 0, display: "grid", gap: "1rem" }}>
+          <div className="card-grid">
             {slot.products.map((p) => (
-              <li key={p.id} style={{ border: "1px solid #ddd", padding: "1rem", borderRadius: 8 }}>
-                <a href={`/products/${p.id}`} style={{ color: "inherit", textDecoration: "none" }}>
-                  <strong>{p.name}</strong> <span style={{ color: "#666" }}>{p.sku}</span>
+              <article key={p.id} className="card">
+                <a href={`/products/${p.id}`} className="product-link">
+                  <strong>{p.name}</strong> <span className="muted">{p.sku}</span>
                   <div>{yen(p.priceMinor)}</div>
                 </a>
-              </li>
+              </article>
             ))}
-          </ul>
+          </div>
         </section>
       ) : null}
-      <ul style={{ listStyle: "none", padding: 0, display: "grid", gap: "1rem" }}>
+      <div className="card-grid">
         {products.map((p) => (
-          <li key={p.id} style={{ border: "1px solid #ddd", padding: "1rem", borderRadius: 8 }}>
-            <a href={`/products/${p.id}`} style={{ color: "inherit", textDecoration: "none" }}>
-              <strong>{p.name}</strong> <span style={{ color: "#666" }}>{p.sku}</span>
+          <article key={p.id} className="card">
+            <a href={`/products/${p.id}`} className="product-link">
+              <strong>{p.name}</strong> <span className="muted">{p.sku}</span>
               <div>
                 {yen(p.priceMinor)} · 在庫 {p.availableQty}
               </div>
-              <p style={{ margin: "0.5rem 0 0" }}>{p.description}</p>
+              <p className="muted">{p.description}</p>
             </a>
-          </li>
+          </article>
         ))}
-      </ul>
-    </main>
+      </div>
+    </>
   );
 }

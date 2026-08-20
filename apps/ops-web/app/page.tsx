@@ -77,39 +77,47 @@ export default function OpsPage() {
   }
 
   return (
-    <main>
-      <p style={{ color: "#555" }}>
-        入庫するとグリッドとライブフィードが更新されます。認証は開発ヘッダ（ops）。Redis は使わずプロセス内 SSE です。
-      </p>
-      {err ? <p>{err}</p> : null}
-      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "1.5rem" }}>
-        <section>
-          <h1>在庫グリッド</h1>
-          <label>
-            入庫数量{" "}
-            <input type="number" min={1} value={qty} onChange={(e) => setQty(Number(e.target.value))} />
-          </label>
-          <table style={{ width: "100%", borderCollapse: "collapse", marginTop: "0.75rem" }}>
+    <>
+      <section className="hero">
+        <h1 className="page-title">在庫グリッド</h1>
+        <p className="page-lead">
+          入庫するとグリッドとライブフィードが更新されます。認証は開発ヘッダ（ops）。Redis は使わずプロセス内 SSE です。
+        </p>
+      </section>
+      {err ? <p className="error">{err}</p> : null}
+      <div className="ops-grid">
+        <section className="card">
+          <div className="field field-inline">
+            <label htmlFor="inbound-qty">入庫数量</label>
+            <input
+              id="inbound-qty"
+              type="number"
+              min={1}
+              value={qty}
+              onChange={(e) => setQty(Number(e.target.value))}
+            />
+          </div>
+          <table>
             <thead>
               <tr>
-                <th align="left">SKU</th>
-                <th align="right">on-hand</th>
-                <th align="right">reserved</th>
-                <th align="right">available</th>
+                <th>SKU</th>
+                <th>on-hand</th>
+                <th>reserved</th>
+                <th>available</th>
                 <th></th>
               </tr>
             </thead>
             <tbody>
               {rows.map((r) => (
-                <tr key={r.productId} style={{ background: r.availableQty <= 1 ? "#fff3cd" : undefined }}>
+                <tr key={r.productId} className={r.availableQty <= 1 ? "row-warn" : undefined}>
                   <td>
                     {r.sku} {r.name}
                   </td>
-                  <td align="right">{r.qty}</td>
-                  <td align="right">{r.reservedQty}</td>
-                  <td align="right">{r.availableQty}</td>
+                  <td>{r.qty}</td>
+                  <td>{r.reservedQty}</td>
+                  <td>{r.availableQty}</td>
                   <td>
-                    <button type="button" onClick={() => inbound(r.productId)}>
+                    <button type="button" className="btn" onClick={() => inbound(r.productId)}>
                       入庫
                     </button>
                   </td>
@@ -118,23 +126,27 @@ export default function OpsPage() {
             </tbody>
           </table>
         </section>
-        <section>
-          <h2>ライブフィード</h2>
-          <ul>
-            {feed.map((line, i) => (
-              <li key={i}>{line}</li>
-            ))}
-          </ul>
-          <h2>通知 outbox</h2>
-          <ul>
-            {mail.map((m) => (
-              <li key={m.id}>
-                {m.type} {m.orderId.slice(0, 8)}…
-              </li>
-            ))}
-          </ul>
-        </section>
+        <div className="stack">
+          <section className="card">
+            <h2 className="section-title">ライブフィード</h2>
+            <ul>
+              {feed.map((line, i) => (
+                <li key={i}>{line}</li>
+              ))}
+            </ul>
+          </section>
+          <section className="card">
+            <h2 className="section-title">通知 outbox</h2>
+            <ul>
+              {mail.map((m) => (
+                <li key={m.id}>
+                  {m.type} {m.orderId.slice(0, 8)}…
+                </li>
+              ))}
+            </ul>
+          </section>
+        </div>
       </div>
-    </main>
+    </>
   );
 }
