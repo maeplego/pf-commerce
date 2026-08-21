@@ -1,4 +1,9 @@
-﻿# pf-commerce
+# pf-commerce
+
+| まず | リンク |
+| --- | --- |
+| 採用の位置づけ | [HIRING.md](https://github.com/maeplego/portfolio-plan/blob/master/portfolio-plan/HIRING.md) |
+| 確認手順 | [REVIEW.md](https://github.com/maeplego/portfolio-plan/blob/master/portfolio-plan/REVIEW.md) |
 
 学習用の EC です。商品、在庫引当、注文、決済モック、通知ログ、公開 REST、GraphQL BFF、ストアフロント、在庫グリッドを **1 リポジトリのプロセス分割** で動かします。本物のカード番号は扱いません。**本番 EC の置き換えではありません。**
 
