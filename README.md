@@ -1,4 +1,4 @@
-# pf-commerce
+﻿# pf-commerce
 
 学習用の EC です。商品、在庫引当、注文、決済モック、通知ログ、公開 REST、GraphQL BFF、ストアフロント、在庫グリッドを **1 リポジトリのプロセス分割** で動かします。本物のカード番号は扱いません。**本番 EC の置き換えではありません。**
 
@@ -62,3 +62,13 @@ node scripts/compose-smoke.mjs http://localhost:8099/health http://localhost:811
 ```
 
 設計の詳細は [portfolio-plan](https://github.com/maeplego/portfolio-plan) の `portfolio-plan/commerce-platform/docs/` です。
+
+## ライセンスと利用条件
+
+本リポジトリは **デモ・学習・社内評価用** です。現状品質に **保証はありません**。
+
+- 許可: クローン、ローカル実行、学習、非本番の評価
+- 別契約が必要: 本番運用、有償サービスへの組込み、再販・托管の提供
+
+詳細は [LICENSE](./LICENSE) と [licensing.md](https://github.com/maeplego/portfolio-plan/blob/master/portfolio-plan/licensing.md) を参照してください。
+
