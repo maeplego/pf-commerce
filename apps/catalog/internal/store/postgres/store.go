@@ -74,9 +74,9 @@ func isUnique(err error) bool {
 
 func (s *Store) Create(ctx context.Context, p catalog.Product) error {
 	_, err := s.pool.Exec(ctx, `INSERT INTO catalog_products
-		(id, sku, name, description, price_minor, currency, image_url, active, created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-		p.ID, p.SKU, p.Name, p.Description, p.Price.Minor, p.Price.Currency, p.ImageURL, p.Active, p.CreatedAt, p.UpdatedAt)
+		(id, org_id, sku, name, description, price_minor, currency, image_url, active, created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+		p.ID, p.OrgID, p.SKU, p.Name, p.Description, p.Price.Minor, p.Price.Currency, p.ImageURL, p.Active, p.CreatedAt, p.UpdatedAt)
 	if isUnique(err) {
 		return catalog.ErrConflict
 	}
@@ -87,7 +87,7 @@ func scanProduct(row pgx.Row) (catalog.Product, error) {
 	var p catalog.Product
 	var minor int64
 	var currency string
-	err := row.Scan(&p.ID, &p.SKU, &p.Name, &p.Description, &minor, &currency, &p.ImageURL, &p.Active, &p.CreatedAt, &p.UpdatedAt)
+	err := row.Scan(&p.ID, &p.OrgID, &p.SKU, &p.Name, &p.Description, &minor, &currency, &p.ImageURL, &p.Active, &p.CreatedAt, &p.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return catalog.Product{}, catalog.ErrNotFound
 	}
@@ -102,19 +102,18 @@ func scanProduct(row pgx.Row) (catalog.Product, error) {
 	return p, nil
 }
 
+const productCols = `id, org_id, sku, name, description, price_minor, currency, image_url, active, created_at, updated_at`
+
 func (s *Store) Get(ctx context.Context, id string) (catalog.Product, error) {
-	return scanProduct(s.pool.QueryRow(ctx, `SELECT id, sku, name, description, price_minor, currency, image_url, active, created_at, updated_at
-		FROM catalog_products WHERE id=$1`, id))
+	return scanProduct(s.pool.QueryRow(ctx, `SELECT `+productCols+` FROM catalog_products WHERE id=$1`, id))
 }
 
 func (s *Store) GetBySKU(ctx context.Context, sku string) (catalog.Product, error) {
-	return scanProduct(s.pool.QueryRow(ctx, `SELECT id, sku, name, description, price_minor, currency, image_url, active, created_at, updated_at
-		FROM catalog_products WHERE sku=$1`, sku))
+	return scanProduct(s.pool.QueryRow(ctx, `SELECT `+productCols+` FROM catalog_products WHERE sku=$1`, sku))
 }
 
-func (s *Store) List(ctx context.Context) ([]catalog.Product, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id, sku, name, description, price_minor, currency, image_url, active, created_at, updated_at
-		FROM catalog_products ORDER BY sku`)
+func (s *Store) List(ctx context.Context, orgID string) ([]catalog.Product, error) {
+	rows, err := s.pool.Query(ctx, `SELECT `+productCols+` FROM catalog_products WHERE org_id=$1 ORDER BY sku`, orgID)
 	if err != nil {
 		return nil, err
 	}

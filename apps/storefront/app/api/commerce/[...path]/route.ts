@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { readCookie } from "@/lib/oidc/cookies";
 import { commerceApiBase, oidcEnabled } from "@/lib/oidc/env";
+import { getCommerceSession } from "@/lib/session";
 
 async function proxy(req: NextRequest, path: string[]) {
   const suffix = path.join("/");
@@ -16,6 +17,10 @@ async function proxy(req: NextRequest, path: string[]) {
   if (idempotency) {
     headers.set("Idempotency-Key", idempotency);
   }
+  const session = await getCommerceSession();
+  if (session.orgId) {
+    headers.set("X-Dev-User-Org", session.orgId);
+  }
   if (oidcEnabled()) {
     const access = await readCookie("rp_access");
     if (!access) {
@@ -24,7 +29,7 @@ async function proxy(req: NextRequest, path: string[]) {
     headers.set("Authorization", `Bearer ${access}`);
     headers.set("X-Dev-Role", "buyer");
   } else {
-    const sub = req.headers.get("x-dev-user-sub");
+    const sub = req.headers.get("x-dev-user-sub") || session.sub;
     if (sub) {
       headers.set("X-Dev-User-Sub", sub);
       headers.set("X-Dev-Role", req.headers.get("x-dev-role") ?? "buyer");
@@ -36,7 +41,10 @@ async function proxy(req: NextRequest, path: string[]) {
   }
   const upstream = await fetch(url, init);
   const body = await upstream.arrayBuffer();
-  return new NextResponse(body, { status: upstream.status, headers: { "content-type": upstream.headers.get("content-type") ?? "application/json" } });
+  return new NextResponse(body, {
+    status: upstream.status,
+    headers: { "content-type": upstream.headers.get("content-type") ?? "application/json" },
+  });
 }
 
 type Ctx = { params: Promise<{ path: string[] }> };

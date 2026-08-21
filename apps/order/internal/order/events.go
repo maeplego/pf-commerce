@@ -65,6 +65,7 @@ type Persistence interface {
 
 type OrderCreatedData struct {
 	BuyerSub       string `json:"buyerSub"`
+	OrgID          string `json:"orgId"`
 	IdempotencyKey string `json:"idempotencyKey"`
 	AmountMinor    int64  `json:"amountMinor"`
 	Currency       string `json:"currency"`
@@ -105,6 +106,7 @@ func Apply(o Order, e RecordedEvent) (Order, error) {
 		o = Order{
 			ID:             e.StreamID,
 			BuyerSub:       d.BuyerSub,
+			OrgID:          d.OrgID,
 			Status:         StatusPending,
 			Amount:         amt,
 			IdempotencyKey: d.IdempotencyKey,
@@ -145,14 +147,14 @@ func DecideCreate(existing Order, in CheckoutInput, lines []Line, totalMinor int
 	if existing.ID != "" {
 		return nil, ErrConflict
 	}
-	if in.BuyerSub == "" || in.IdempotencyKey == "" || len(lines) == 0 {
+	if in.BuyerSub == "" || in.OrgID == "" || in.IdempotencyKey == "" || len(lines) == 0 {
 		return nil, ErrInvalid
 	}
 	return []NewEvent{{
 		Type: EventOrderCreated,
 		Time: now,
 		Data: OrderCreatedData{
-			BuyerSub: in.BuyerSub, IdempotencyKey: in.IdempotencyKey,
+			BuyerSub: in.BuyerSub, OrgID: in.OrgID, IdempotencyKey: in.IdempotencyKey,
 			AmountMinor: totalMinor, Currency: currency, Lines: lines,
 		},
 	}}, nil

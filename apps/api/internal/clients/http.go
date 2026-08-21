@@ -20,6 +20,7 @@ type Product struct {
 	Currency    string `json:"currency"`
 	ImageURL    string `json:"imageUrl"`
 	Active      bool   `json:"active"`
+	OrgID       string `json:"orgId"`
 }
 
 type HTTP struct {
@@ -58,11 +59,15 @@ func (h *HTTP) Ping(ctx context.Context) error {
 	return nil
 }
 
-func (h *HTTP) ListProducts(ctx context.Context) ([]Product, error) {
+func (h *HTTP) ListProducts(ctx context.Context, orgID string) ([]Product, error) {
 	var body struct {
 		Products []Product `json:"products"`
 	}
-	if err := h.getJSON(ctx, h.Catalog+"/v1/products", &body); err != nil {
+	u := h.Catalog + "/v1/products"
+	if orgID != "" {
+		u += "?orgId=" + orgID
+	}
+	if err := h.getJSON(ctx, u, &body); err != nil {
 		return nil, err
 	}
 	return body.Products, nil
@@ -209,7 +214,7 @@ func (h *HTTP) PostOrder(ctx context.Context, path string, header http.Header) (
 }
 
 func copyAuth(req *http.Request, header http.Header) {
-	for _, k := range []string{"X-Dev-User-Sub", "X-Dev-Role", "Idempotency-Key", "Content-Type"} {
+	for _, k := range []string{"Authorization", "X-Dev-User-Sub", "X-Dev-User-Org", "X-Dev-Role", "Idempotency-Key", "Content-Type"} {
 		if v := header.Get(k); v != "" {
 			req.Header.Set(k, v)
 		}

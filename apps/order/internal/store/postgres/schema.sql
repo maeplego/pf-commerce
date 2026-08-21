@@ -3,6 +3,7 @@
 CREATE TABLE IF NOT EXISTS commerce_orders (
   id TEXT PRIMARY KEY,
   buyer_sub TEXT NOT NULL,
+  org_id TEXT NOT NULL DEFAULT 'org-demo-a',
   status TEXT NOT NULL,
   cancel_reason TEXT NOT NULL DEFAULT '',
   amount_minor BIGINT NOT NULL CHECK (amount_minor >= 0),
@@ -11,8 +12,10 @@ CREATE TABLE IF NOT EXISTS commerce_orders (
   payment_id TEXT NOT NULL DEFAULT '',
   created_at TIMESTAMPTZ NOT NULL,
   updated_at TIMESTAMPTZ NOT NULL,
-  UNIQUE (buyer_sub, idempotency_key)
+  UNIQUE (buyer_sub, org_id, idempotency_key)
 );
+
+ALTER TABLE commerce_orders ADD COLUMN IF NOT EXISTS org_id TEXT NOT NULL DEFAULT 'org-demo-a';
 
 CREATE TABLE IF NOT EXISTS commerce_order_lines (
   order_id TEXT NOT NULL,

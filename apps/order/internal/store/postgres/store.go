@@ -82,9 +82,9 @@ func (s *Store) Create(ctx context.Context, o order.Order) error {
 	}
 	defer tx.Rollback(ctx)
 	_, err = tx.Exec(ctx, `INSERT INTO commerce_orders
-		(id, buyer_sub, status, cancel_reason, amount_minor, currency, idempotency_key, payment_id, created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-		o.ID, o.BuyerSub, o.Status, o.CancelReason, o.Amount.Minor, o.Amount.Currency, o.IdempotencyKey, o.PaymentID, o.CreatedAt, o.UpdatedAt)
+		(id, buyer_sub, org_id, status, cancel_reason, amount_minor, currency, idempotency_key, payment_id, created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+		o.ID, o.BuyerSub, o.OrgID, o.Status, o.CancelReason, o.Amount.Minor, o.Amount.Currency, o.IdempotencyKey, o.PaymentID, o.CreatedAt, o.UpdatedAt)
 	if isUnique(err) {
 		return order.ErrConflict
 	}
@@ -103,7 +103,7 @@ func (s *Store) Create(ctx context.Context, o order.Order) error {
 }
 
 func (s *Store) Get(ctx context.Context, id string) (order.Order, error) {
-	o, err := scanOrder(s.pool.QueryRow(ctx, `SELECT id, buyer_sub, status, cancel_reason, amount_minor, currency, idempotency_key, payment_id, created_at, updated_at
+	o, err := scanOrder(s.pool.QueryRow(ctx, `SELECT id, buyer_sub, org_id, status, cancel_reason, amount_minor, currency, idempotency_key, payment_id, created_at, updated_at
 		FROM commerce_orders WHERE id=$1`, id))
 	if err != nil {
 		return order.Order{}, err
@@ -116,9 +116,9 @@ func (s *Store) Get(ctx context.Context, id string) (order.Order, error) {
 	return o, nil
 }
 
-func (s *Store) GetByIdempotency(ctx context.Context, buyerSub, key string) (order.Order, error) {
-	o, err := scanOrder(s.pool.QueryRow(ctx, `SELECT id, buyer_sub, status, cancel_reason, amount_minor, currency, idempotency_key, payment_id, created_at, updated_at
-		FROM commerce_orders WHERE buyer_sub=$1 AND idempotency_key=$2`, buyerSub, key))
+func (s *Store) GetByIdempotency(ctx context.Context, buyerSub, orgID, key string) (order.Order, error) {
+	o, err := scanOrder(s.pool.QueryRow(ctx, `SELECT id, buyer_sub, org_id, status, cancel_reason, amount_minor, currency, idempotency_key, payment_id, created_at, updated_at
+		FROM commerce_orders WHERE buyer_sub=$1 AND org_id=$2 AND idempotency_key=$3`, buyerSub, orgID, key))
 	if err != nil {
 		return order.Order{}, err
 	}
@@ -130,9 +130,9 @@ func (s *Store) GetByIdempotency(ctx context.Context, buyerSub, key string) (ord
 	return o, nil
 }
 
-func (s *Store) ListByBuyer(ctx context.Context, buyerSub string) ([]order.Order, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id, buyer_sub, status, cancel_reason, amount_minor, currency, idempotency_key, payment_id, created_at, updated_at
-		FROM commerce_orders WHERE buyer_sub=$1 ORDER BY created_at DESC`, buyerSub)
+func (s *Store) ListByBuyer(ctx context.Context, buyerSub, orgID string) ([]order.Order, error) {
+	rows, err := s.pool.Query(ctx, `SELECT id, buyer_sub, org_id, status, cancel_reason, amount_minor, currency, idempotency_key, payment_id, created_at, updated_at
+		FROM commerce_orders WHERE buyer_sub=$1 AND org_id=$2 ORDER BY created_at DESC`, buyerSub, orgID)
 	if err != nil {
 		return nil, err
 	}
@@ -159,7 +159,7 @@ func (s *Store) ListByBuyer(ctx context.Context, buyerSub string) ([]order.Order
 }
 
 func (s *Store) ListAll(ctx context.Context) ([]order.Order, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id, buyer_sub, status, cancel_reason, amount_minor, currency, idempotency_key, payment_id, created_at, updated_at
+	rows, err := s.pool.Query(ctx, `SELECT id, buyer_sub, org_id, status, cancel_reason, amount_minor, currency, idempotency_key, payment_id, created_at, updated_at
 		FROM commerce_orders ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
@@ -220,7 +220,7 @@ func scanOrder(row pgx.Row) (order.Order, error) {
 	var o order.Order
 	var minor int64
 	var currency string
-	err := row.Scan(&o.ID, &o.BuyerSub, &o.Status, &o.CancelReason, &minor, &currency, &o.IdempotencyKey, &o.PaymentID, &o.CreatedAt, &o.UpdatedAt)
+	err := row.Scan(&o.ID, &o.BuyerSub, &o.OrgID, &o.Status, &o.CancelReason, &minor, &currency, &o.IdempotencyKey, &o.PaymentID, &o.CreatedAt, &o.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return order.Order{}, order.ErrNotFound
 	}
@@ -380,11 +380,11 @@ func scanEvents(rows pgx.Rows) ([]order.RecordedEvent, error) {
 
 func upsertProjection(ctx context.Context, tx pgx.Tx, o order.Order) error {
 	_, err := tx.Exec(ctx, `INSERT INTO commerce_orders
-		(id, buyer_sub, status, cancel_reason, amount_minor, currency, idempotency_key, payment_id, created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+		(id, buyer_sub, org_id, status, cancel_reason, amount_minor, currency, idempotency_key, payment_id, created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
 		ON CONFLICT (id) DO UPDATE SET
-			status=EXCLUDED.status, cancel_reason=EXCLUDED.cancel_reason, payment_id=EXCLUDED.payment_id, updated_at=EXCLUDED.updated_at`,
-		o.ID, o.BuyerSub, o.Status, o.CancelReason, o.Amount.Minor, o.Amount.Currency, o.IdempotencyKey, o.PaymentID, o.CreatedAt, o.UpdatedAt)
+			status=EXCLUDED.status, cancel_reason=EXCLUDED.cancel_reason, payment_id=EXCLUDED.payment_id, updated_at=EXCLUDED.updated_at, org_id=EXCLUDED.org_id`,
+		o.ID, o.BuyerSub, o.OrgID, o.Status, o.CancelReason, o.Amount.Minor, o.Amount.Currency, o.IdempotencyKey, o.PaymentID, o.CreatedAt, o.UpdatedAt)
 	if err != nil {
 		return err
 	}

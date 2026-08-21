@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/portfolio/pf-commerce/packages/auth"
 	"github.com/portfolio/pf-commerce/packages/id"
 	"github.com/portfolio/pf-commerce/packages/money"
 )
@@ -18,6 +19,7 @@ var (
 
 type Product struct {
 	ID          string
+	OrgID       string
 	SKU         string
 	Name        string
 	Description string
@@ -40,7 +42,7 @@ type Repository interface {
 	Create(ctx context.Context, p Product) error
 	Get(ctx context.Context, id string) (Product, error)
 	GetBySKU(ctx context.Context, sku string) (Product, error)
-	List(ctx context.Context) ([]Product, error)
+	List(ctx context.Context, orgID string) ([]Product, error)
 	AddReview(ctx context.Context, r Review) error
 	ListReviews(ctx context.Context, productIDs []string) ([]Review, error)
 }
@@ -58,12 +60,20 @@ func NewService(repo Repository, now func() time.Time) *Service {
 }
 
 type CreateInput struct {
+	OrgID       string
 	SKU         string
 	Name        string
 	Description string
 	PriceMinor  int64
 	Currency    string
 	ImageURL    string
+}
+
+func normalizeOrg(orgID string) string {
+	if strings.TrimSpace(orgID) == "" {
+		return auth.DefaultOrgID
+	}
+	return strings.TrimSpace(orgID)
 }
 
 func (s *Service) Create(ctx context.Context, in CreateInput) (Product, error) {
@@ -84,6 +94,7 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (Product, error) {
 	now := s.now()
 	p := Product{
 		ID:          id.New(),
+		OrgID:       normalizeOrg(in.OrgID),
 		SKU:         sku,
 		Name:        name,
 		Description: strings.TrimSpace(in.Description),
@@ -114,8 +125,8 @@ func (s *Service) GetBySKU(ctx context.Context, sku string) (Product, error) {
 	return s.repo.GetBySKU(ctx, sku)
 }
 
-func (s *Service) List(ctx context.Context) ([]Product, error) {
-	return s.repo.List(ctx)
+func (s *Service) List(ctx context.Context, orgID string) ([]Product, error) {
+	return s.repo.List(ctx, normalizeOrg(orgID))
 }
 
 func (s *Service) AddReview(ctx context.Context, productID, author, body string) (Review, error) {

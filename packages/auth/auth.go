@@ -19,9 +19,12 @@ const (
 	RoleOps   Role = "ops"
 )
 
+const DefaultOrgID = "org-demo-a"
+
 type User struct {
-	Sub  string
-	Role Role
+	Sub   string
+	Role  Role
+	OrgID string
 }
 
 func WithUser(ctx context.Context, u User) context.Context {
@@ -68,7 +71,11 @@ func (m *Middleware) authenticate(r *http.Request) (User, error) {
 			if role != RoleBuyer && role != RoleOps {
 				return User{}, fmt.Errorf("invalid role")
 			}
-			return User{Sub: sub, Role: role}, nil
+			orgID := strings.TrimSpace(r.Header.Get("X-Dev-User-Org"))
+			if orgID == "" {
+				orgID = DefaultOrgID
+			}
+			return User{Sub: sub, Role: role, OrgID: orgID}, nil
 		}
 	}
 	authz := strings.TrimSpace(r.Header.Get("Authorization"))
@@ -79,7 +86,7 @@ func (m *Middleware) authenticate(r *http.Request) (User, error) {
 	if token == "" || m.internalBase == "" {
 		return User{}, fmt.Errorf("oidc not configured")
 	}
-	sub, err := m.userinfoSub(r.Context(), token)
+	sub, orgID, err := m.userinfo(r.Context(), token)
 	if err != nil {
 		return User{}, err
 	}
@@ -87,38 +94,43 @@ func (m *Middleware) authenticate(r *http.Request) (User, error) {
 	if strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Dev-Role")), "ops") {
 		role = RoleOps
 	}
-	return User{Sub: sub, Role: role}, nil
+	return User{Sub: sub, Role: role, OrgID: orgID}, nil
 }
 
-func (m *Middleware) userinfoSub(ctx context.Context, token string) (string, error) {
+func (m *Middleware) userinfo(ctx context.Context, token string) (string, string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, m.internalBase+"/userinfo", nil)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("userinfo %d", res.StatusCode)
+		return "", "", fmt.Errorf("userinfo %d", res.StatusCode)
 	}
 	body, err := io.ReadAll(io.LimitReader(res.Body, 4096))
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	var ui struct {
-		Sub string `json:"sub"`
+		Sub   string `json:"sub"`
+		OrgID string `json:"org_id"`
 	}
 	if err := json.Unmarshal(body, &ui); err != nil {
-		return "", err
+		return "", "", err
 	}
 	sub := strings.TrimSpace(ui.Sub)
 	if sub == "" {
-		return "", fmt.Errorf("empty sub")
+		return "", "", fmt.Errorf("empty sub")
 	}
-	return sub, nil
+	orgID := strings.TrimSpace(ui.OrgID)
+	if orgID == "" {
+		return "", "", fmt.Errorf("org_id required")
+	}
+	return sub, orgID, nil
 }

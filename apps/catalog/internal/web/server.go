@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/portfolio/pf-commerce/apps/catalog/internal/catalog"
+	"github.com/portfolio/pf-commerce/packages/auth"
 	"github.com/portfolio/pf-commerce/packages/httpjson"
 	"github.com/portfolio/pf-commerce/packages/money"
 )
@@ -34,6 +35,7 @@ func (s *Server) Routes() http.Handler {
 
 type productJSON struct {
 	ID          string `json:"id"`
+	OrgID       string `json:"orgId"`
 	SKU         string `json:"sku"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
@@ -45,13 +47,23 @@ type productJSON struct {
 
 func toJSON(p catalog.Product) productJSON {
 	return productJSON{
-		ID: p.ID, SKU: p.SKU, Name: p.Name, Description: p.Description,
+		ID: p.ID, OrgID: p.OrgID, SKU: p.SKU, Name: p.Name, Description: p.Description,
 		PriceMinor: p.Price.Minor, Currency: p.Price.Currency, ImageURL: p.ImageURL, Active: p.Active,
 	}
 }
 
+func requestOrgID(r *http.Request) string {
+	if org := strings.TrimSpace(r.URL.Query().Get("orgId")); org != "" {
+		return org
+	}
+	if org := strings.TrimSpace(r.Header.Get("X-Dev-User-Org")); org != "" {
+		return org
+	}
+	return auth.DefaultOrgID
+}
+
 func (s *Server) list(w http.ResponseWriter, r *http.Request) {
-	list, err := s.cat.List(r.Context())
+	list, err := s.cat.List(r.Context(), requestOrgID(r))
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -98,6 +110,7 @@ func (s *Server) reviews(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) create(w http.ResponseWriter, r *http.Request) {
 	var body struct {
+		OrgID       string `json:"orgId"`
 		SKU         string `json:"sku"`
 		Name        string `json:"name"`
 		Description string `json:"description"`
@@ -109,8 +122,12 @@ func (s *Server) create(w http.ResponseWriter, r *http.Request) {
 		httpjson.WriteError(w, http.StatusBadRequest, "invalid", "invalid json")
 		return
 	}
+	orgID := body.OrgID
+	if orgID == "" {
+		orgID = requestOrgID(r)
+	}
 	p, err := s.cat.Create(r.Context(), catalog.CreateInput{
-		SKU: body.SKU, Name: body.Name, Description: body.Description,
+		OrgID: orgID, SKU: body.SKU, Name: body.Name, Description: body.Description,
 		PriceMinor: body.PriceMinor, Currency: body.Currency, ImageURL: body.ImageURL,
 	})
 	if err != nil {

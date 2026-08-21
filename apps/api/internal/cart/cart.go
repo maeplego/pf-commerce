@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/portfolio/pf-commerce/packages/auth"
 	"github.com/portfolio/pf-commerce/packages/id"
 )
 
@@ -18,13 +19,14 @@ type Item struct {
 
 type Cart struct {
 	BuyerSub string
+	OrgID    string
 	Items    []Item
 }
 
 type Repository interface {
-	Get(ctx context.Context, buyerSub string) (Cart, error)
+	Get(ctx context.Context, buyerSub, orgID string) (Cart, error)
 	Replace(ctx context.Context, c Cart) error
-	Clear(ctx context.Context, buyerSub string) error
+	Clear(ctx context.Context, buyerSub, orgID string) error
 }
 
 type Service struct {
@@ -39,16 +41,27 @@ func NewService(repo Repository, now func() time.Time) *Service {
 	return &Service{repo: repo, now: now}
 }
 
-func (s *Service) Get(ctx context.Context, buyerSub string) (Cart, error) {
+func normalizeOrg(orgID string) string {
+	if orgID == "" {
+		return auth.DefaultOrgID
+	}
+	return orgID
+}
+
+func (s *Service) Get(ctx context.Context, buyerSub, orgID string) (Cart, error) {
 	if buyerSub == "" {
 		return Cart{}, ErrInvalid
 	}
-	c, err := s.repo.Get(ctx, buyerSub)
+	orgID = normalizeOrg(orgID)
+	c, err := s.repo.Get(ctx, buyerSub, orgID)
 	if err != nil {
 		return Cart{}, err
 	}
 	if c.BuyerSub == "" {
 		c.BuyerSub = buyerSub
+	}
+	if c.OrgID == "" {
+		c.OrgID = orgID
 	}
 	if c.Items == nil {
 		c.Items = []Item{}
@@ -56,14 +69,15 @@ func (s *Service) Get(ctx context.Context, buyerSub string) (Cart, error) {
 	return c, nil
 }
 
-func (s *Service) Add(ctx context.Context, buyerSub, productID string, qty int) (Cart, error) {
+func (s *Service) Add(ctx context.Context, buyerSub, orgID, productID string, qty int) (Cart, error) {
 	if qty <= 0 || buyerSub == "" {
 		return Cart{}, ErrInvalid
 	}
 	if err := id.Parse(productID); err != nil {
 		return Cart{}, ErrInvalid
 	}
-	c, err := s.Get(ctx, buyerSub)
+	orgID = normalizeOrg(orgID)
+	c, err := s.Get(ctx, buyerSub, orgID)
 	if err != nil {
 		return Cart{}, err
 	}
@@ -81,16 +95,18 @@ func (s *Service) Add(ctx context.Context, buyerSub, productID string, qty int) 
 		c.Items = append(c.Items, Item{ProductID: productID, Qty: qty, UpdatedAt: now})
 	}
 	c.BuyerSub = buyerSub
+	c.OrgID = orgID
 	if err := s.repo.Replace(ctx, c); err != nil {
 		return Cart{}, err
 	}
 	return c, nil
 }
 
-func (s *Service) Replace(ctx context.Context, buyerSub string, items []Item) (Cart, error) {
+func (s *Service) Replace(ctx context.Context, buyerSub, orgID string, items []Item) (Cart, error) {
 	if buyerSub == "" {
 		return Cart{}, ErrInvalid
 	}
+	orgID = normalizeOrg(orgID)
 	now := s.now()
 	out := make([]Item, 0, len(items))
 	for _, it := range items {
@@ -103,16 +119,16 @@ func (s *Service) Replace(ctx context.Context, buyerSub string, items []Item) (C
 		it.UpdatedAt = now
 		out = append(out, it)
 	}
-	c := Cart{BuyerSub: buyerSub, Items: out}
+	c := Cart{BuyerSub: buyerSub, OrgID: orgID, Items: out}
 	if err := s.repo.Replace(ctx, c); err != nil {
 		return Cart{}, err
 	}
 	return c, nil
 }
 
-func (s *Service) Clear(ctx context.Context, buyerSub string) error {
+func (s *Service) Clear(ctx context.Context, buyerSub, orgID string) error {
 	if buyerSub == "" {
 		return ErrInvalid
 	}
-	return s.repo.Clear(ctx, buyerSub)
+	return s.repo.Clear(ctx, buyerSub, normalizeOrg(orgID))
 }

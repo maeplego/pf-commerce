@@ -77,8 +77,31 @@ func withQty(p clients.Product, qty int) productJSON {
 	}
 }
 
+func requestOrgID(r *http.Request) string {
+	if u, ok := auth.UserFrom(r.Context()); ok && u.OrgID != "" {
+		return u.OrgID
+	}
+	if org := strings.TrimSpace(r.Header.Get("X-Dev-User-Org")); org != "" {
+		return org
+	}
+	if org := strings.TrimSpace(r.URL.Query().Get("orgId")); org != "" {
+		return org
+	}
+	return auth.DefaultOrgID
+}
+
+func forwardAuth(r *http.Request) http.Header {
+	h := r.Header.Clone()
+	if u, ok := auth.UserFrom(r.Context()); ok {
+		h.Set("X-Dev-User-Sub", u.Sub)
+		h.Set("X-Dev-User-Org", u.OrgID)
+		h.Set("X-Dev-Role", string(u.Role))
+	}
+	return h
+}
+
 func (s *Server) listProducts(w http.ResponseWriter, r *http.Request) {
-	list, err := s.be.ListProducts(r.Context())
+	list, err := s.be.ListProducts(r.Context(), requestOrgID(r))
 	if err != nil {
 		httpjson.WriteError(w, http.StatusBadGateway, "upstream", err.Error())
 		return
@@ -123,7 +146,7 @@ func (s *Server) getProduct(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) getCart(w http.ResponseWriter, r *http.Request) {
 	u, _ := auth.UserFrom(r.Context())
-	c, err := s.carts.Get(r.Context(), u.Sub)
+	c, err := s.carts.Get(r.Context(), u.Sub, u.OrgID)
 	if err != nil {
 		httpjson.WriteError(w, http.StatusBadRequest, "invalid", err.Error())
 		return
@@ -148,7 +171,7 @@ func (s *Server) addCartItem(w http.ResponseWriter, r *http.Request) {
 		httpjson.WriteError(w, http.StatusBadGateway, "upstream", err.Error())
 		return
 	}
-	c, err := s.carts.Add(r.Context(), u.Sub, body.ProductID, body.Qty)
+	c, err := s.carts.Add(r.Context(), u.Sub, u.OrgID, body.ProductID, body.Qty)
 	if err != nil {
 		httpjson.WriteError(w, http.StatusBadRequest, "invalid", err.Error())
 		return
@@ -172,7 +195,7 @@ func (s *Server) replaceCart(w http.ResponseWriter, r *http.Request) {
 	for _, it := range body.Items {
 		items = append(items, cart.Item{ProductID: it.ProductID, Qty: it.Qty})
 	}
-	c, err := s.carts.Replace(r.Context(), u.Sub, items)
+	c, err := s.carts.Replace(r.Context(), u.Sub, u.OrgID, items)
 	if err != nil {
 		httpjson.WriteError(w, http.StatusBadRequest, "invalid", err.Error())
 		return
@@ -202,7 +225,7 @@ func (s *Server) checkout(w http.ResponseWriter, r *http.Request) {
 	}
 	useCart := len(body.Lines) == 0
 	if useCart {
-		c, err := s.carts.Get(r.Context(), u.Sub)
+		c, err := s.carts.Get(r.Context(), u.Sub, u.OrgID)
 		if err != nil {
 			httpjson.WriteError(w, http.StatusBadRequest, "invalid", err.Error())
 			return
@@ -221,13 +244,14 @@ func (s *Server) checkout(w http.ResponseWriter, r *http.Request) {
 	payload, err := json.Marshal(map[string]any{
 		"idempotencyKey": body.IdempotencyKey,
 		"siteId":         s.siteID,
+		"orgId":          u.OrgID,
 		"lines":          body.Lines,
 	})
 	if err != nil {
 		httpjson.WriteError(w, http.StatusInternalServerError, "error", err.Error())
 		return
 	}
-	out, st, err := s.be.Checkout(r.Context(), payload, r.Header)
+	out, st, err := s.be.Checkout(r.Context(), payload, forwardAuth(r))
 	if err != nil {
 		httpjson.WriteError(w, http.StatusBadGateway, "upstream", err.Error())
 		return
@@ -242,7 +266,7 @@ func (s *Server) checkout(w http.ResponseWriter, r *http.Request) {
 		}
 		if json.Unmarshal(out, &o) == nil && o.Status == "paid" {
 			if useCart {
-				_ = s.carts.Clear(r.Context(), u.Sub)
+				_ = s.carts.Clear(r.Context(), u.Sub, u.OrgID)
 			}
 			if s.recommendURL != "" && len(o.Lines) > 0 {
 				lines := make([]recommendevents.Line, 0, len(o.Lines))
@@ -259,7 +283,7 @@ func (s *Server) checkout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) proxyOrderGET(w http.ResponseWriter, r *http.Request) {
-	out, st, err := s.be.GetOrders(r.Context(), r.URL.Path, r.Header)
+	out, st, err := s.be.GetOrders(r.Context(), r.URL.Path, forwardAuth(r))
 	if err != nil {
 		httpjson.WriteError(w, http.StatusBadGateway, "upstream", err.Error())
 		return
@@ -270,7 +294,7 @@ func (s *Server) proxyOrderGET(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) proxyOrderPOST(w http.ResponseWriter, r *http.Request) {
-	out, st, err := s.be.PostOrder(r.Context(), r.URL.Path, r.Header)
+	out, st, err := s.be.PostOrder(r.Context(), r.URL.Path, forwardAuth(r))
 	if err != nil {
 		httpjson.WriteError(w, http.StatusBadGateway, "upstream", err.Error())
 		return
@@ -290,6 +314,13 @@ func (s *Server) opsCreateProduct(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		httpjson.WriteError(w, http.StatusBadRequest, "invalid", "invalid json")
 		return
+	}
+	var body map[string]any
+	if err := json.Unmarshal(raw, &body); err == nil {
+		if _, ok := body["orgId"]; !ok || body["orgId"] == "" {
+			body["orgId"] = u.OrgID
+			raw, _ = json.Marshal(body)
+		}
 	}
 	p, st, b, err := s.be.CreateProduct(r.Context(), raw)
 	if err != nil && st == 0 {
@@ -344,7 +375,7 @@ func (s *Server) opsStock(w http.ResponseWriter, r *http.Request) {
 		httpjson.WriteError(w, http.StatusForbidden, "forbidden", "ops role required")
 		return
 	}
-	products, err := s.be.ListProducts(r.Context())
+	products, err := s.be.ListProducts(r.Context(), u.OrgID)
 	if err != nil {
 		httpjson.WriteError(w, http.StatusBadGateway, "upstream", err.Error())
 		return
@@ -443,5 +474,5 @@ func cartJSON(c cart.Cart) map[string]any {
 	for _, it := range c.Items {
 		items = append(items, map[string]any{"productId": it.ProductID, "qty": it.Qty, "updatedAt": it.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z")})
 	}
-	return map[string]any{"buyerSub": c.BuyerSub, "items": items}
+	return map[string]any{"buyerSub": c.BuyerSub, "orgId": c.OrgID, "items": items}
 }

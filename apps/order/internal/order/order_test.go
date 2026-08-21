@@ -78,7 +78,7 @@ func newWorld(t *testing.T, stock int) *world {
 
 func (w *world) checkout(buyer, key string, qty int) (order.Order, error) {
 	o, _, err := w.orders.Checkout(w.ctx, order.CheckoutInput{
-		BuyerSub: buyer, IdempotencyKey: key, SiteID: w.siteID,
+		BuyerSub: buyer, OrgID: "org-demo-a", IdempotencyKey: key, SiteID: w.siteID,
 		Lines: []order.CheckoutLine{{ProductID: w.mugID, Qty: qty}},
 	})
 	return o, err
@@ -159,7 +159,7 @@ func TestPaidCheckoutPublishesOutboxToNotify(t *testing.T) {
 	n := &fakeNotify{}
 	svc := order.NewService(memory.New(), cat, st, pay, n, clk.Now)
 	_, _, err := svc.Checkout(context.Background(), order.CheckoutInput{
-		BuyerSub: "alice", IdempotencyKey: id.New(), SiteID: id.New(),
+		BuyerSub: "alice", OrgID: "org-demo-a", IdempotencyKey: id.New(), SiteID: id.New(),
 		Lines: []order.CheckoutLine{{ProductID: mugID, Qty: 1}},
 	})
 	if err != nil {
@@ -225,10 +225,10 @@ func TestBuyerCannotReadOthersOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := w.orders.Get(w.ctx, o.ID, "bob", false); err != order.ErrForbidden {
+	if _, err := w.orders.Get(w.ctx, o.ID, "bob", "org-demo-a", false); err != order.ErrForbidden {
 		t.Fatalf("got %v", err)
 	}
-	if _, err := w.orders.Get(w.ctx, o.ID, "bob", true); err != nil {
+	if _, err := w.orders.Get(w.ctx, o.ID, "bob", "org-demo-a", true); err != nil {
 		t.Fatal(err)
 	}
 }

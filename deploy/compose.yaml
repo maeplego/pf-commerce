@@ -61,11 +61,15 @@ services:
     environment:
       COMMERCE_HTTP_PORT: "8103"
       COMMERCE_DEV_AUTH: ${COMMERCE_DEV_AUTH:-true}
+      OIDC_ISSUER: ${OIDC_ISSUER:-}
+      OIDC_INTERNAL_BASE: ${OIDC_INTERNAL_BASE:-}
       COMMERCE_DATABASE_URL: postgres://commerce:commerce@commerce-db:5432/orders?sslmode=disable
       COMMERCE_CATALOG_URL: http://commerce-catalog:8101
       COMMERCE_INVENTORY_URL: http://commerce-inventory:8102
       COMMERCE_PAYMENT_URL: http://commerce-payment:8104
       COMMERCE_NOTIFY_URL: http://commerce-notify:8105
+    extra_hosts:
+      - "localhost:host-gateway"
     depends_on:
       commerce-db-init:
         condition: service_completed_successfully
@@ -115,6 +119,9 @@ services:
     environment:
       COMMERCE_HTTP_PORT: "8099"
       COMMERCE_DEV_AUTH: ${COMMERCE_DEV_AUTH:-true}
+      OIDC_ISSUER: ${OIDC_ISSUER:-}
+      OIDC_INTERNAL_BASE: ${OIDC_INTERNAL_BASE:-}
+      OIDC_AUDIENCE: ${OIDC_AUDIENCE:-}
       COMMERCE_CORS_ORIGIN: ${COMMERCE_CORS_ORIGIN:-http://localhost:3009,http://localhost:3010,http://localhost:8110}
       COMMERCE_DATABASE_URL: postgres://commerce:commerce@commerce-db:5432/gateway?sslmode=disable
       COMMERCE_CATALOG_URL: http://commerce-catalog:8101
@@ -124,6 +131,8 @@ services:
       RECOMMEND_API_URL: ${RECOMMEND_API_URL:-}
     ports:
       - "8099:8099"
+    extra_hosts:
+      - "localhost:host-gateway"
     depends_on:
       commerce-db-init:
         condition: service_completed_successfully
@@ -146,8 +155,16 @@ services:
     environment:
       NEXT_PUBLIC_COMMERCE_API_URL: ${NEXT_PUBLIC_COMMERCE_API_URL:-http://localhost:8099}
       NEXT_PUBLIC_COMMERCE_BFF_URL: ${NEXT_PUBLIC_COMMERCE_BFF_URL:-http://localhost:8110}
+      COMMERCE_API_URL: http://commerce-api:8099
+      OIDC_ISSUER: ${OIDC_ISSUER:-}
+      OIDC_INTERNAL_BASE: ${OIDC_INTERNAL_BASE:-}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+      OIDC_REDIRECT_URI: ${OIDC_REDIRECT_URI:-}
+      OIDC_POST_LOGOUT_REDIRECT_URI: ${OIDC_POST_LOGOUT_REDIRECT_URI:-}
     ports:
       - "3009:3009"
+    extra_hosts:
+      - "localhost:host-gateway"
     depends_on:
       - commerce-api
       - commerce-bff

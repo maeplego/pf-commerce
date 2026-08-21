@@ -2,6 +2,7 @@
 
 CREATE TABLE IF NOT EXISTS catalog_products (
   id TEXT PRIMARY KEY,
+  org_id TEXT NOT NULL DEFAULT 'org-demo-a',
   sku TEXT NOT NULL UNIQUE,
   name TEXT NOT NULL,
   description TEXT NOT NULL DEFAULT '',
@@ -12,6 +13,10 @@ CREATE TABLE IF NOT EXISTS catalog_products (
   created_at TIMESTAMPTZ NOT NULL,
   updated_at TIMESTAMPTZ NOT NULL
 );
+
+ALTER TABLE catalog_products ADD COLUMN IF NOT EXISTS org_id TEXT NOT NULL DEFAULT 'org-demo-a';
+
+CREATE INDEX IF NOT EXISTS catalog_products_org_idx ON catalog_products (org_id);
 
 CREATE TABLE IF NOT EXISTS catalog_reviews (
   id TEXT PRIMARY KEY,

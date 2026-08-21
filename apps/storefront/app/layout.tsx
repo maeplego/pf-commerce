@@ -1,5 +1,7 @@
 import "./globals.css";
 
+import { AuthBar } from "@/components/AuthBar";
+
 export const dynamic = "force-dynamic";
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -17,6 +19,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <nav className="site-nav">
               <a href="/">カタログ</a>
               <a href="/demo">在庫1の同時購入デモ</a>
+              <AuthBar />
               <span className="pill">ops-web は :3010</span>
             </nav>
           </header>

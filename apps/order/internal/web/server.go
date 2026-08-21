@@ -45,6 +45,7 @@ func (s *Server) checkout(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		IdempotencyKey string `json:"idempotencyKey"`
 		SiteID         string `json:"siteId"`
+		OrgID          string `json:"orgId"`
 		Lines          []struct {
 			ProductID string `json:"productId"`
 			Qty       int    `json:"qty"`
@@ -62,7 +63,14 @@ func (s *Server) checkout(w http.ResponseWriter, r *http.Request) {
 	if siteID == "" {
 		siteID = s.siteID
 	}
-	in := order.CheckoutInput{BuyerSub: u.Sub, IdempotencyKey: key, SiteID: siteID}
+	orgID := strings.TrimSpace(body.OrgID)
+	if orgID == "" {
+		orgID = u.OrgID
+	}
+	if orgID == "" {
+		orgID = auth.DefaultOrgID
+	}
+	in := order.CheckoutInput{BuyerSub: u.Sub, OrgID: orgID, IdempotencyKey: key, SiteID: siteID}
 	for _, ln := range body.Lines {
 		in.Lines = append(in.Lines, order.CheckoutLine{ProductID: ln.ProductID, Qty: ln.Qty})
 	}
@@ -84,7 +92,7 @@ func (s *Server) checkout(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) list(w http.ResponseWriter, r *http.Request) {
 	u, _ := auth.UserFrom(r.Context())
-	list, err := s.orders.ListMine(r.Context(), u.Sub)
+	list, err := s.orders.ListMine(r.Context(), u.Sub, u.OrgID)
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -98,7 +106,7 @@ func (s *Server) list(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) get(w http.ResponseWriter, r *http.Request) {
 	u, _ := auth.UserFrom(r.Context())
-	o, err := s.orders.Get(r.Context(), r.PathValue("id"), u.Sub, u.Role == auth.RoleOps)
+	o, err := s.orders.Get(r.Context(), r.PathValue("id"), u.Sub, u.OrgID, u.Role == auth.RoleOps)
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -108,7 +116,7 @@ func (s *Server) get(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	u, _ := auth.UserFrom(r.Context())
-	evs, err := s.orders.Events(r.Context(), r.PathValue("id"), u.Sub, u.Role == auth.RoleOps)
+	evs, err := s.orders.Events(r.Context(), r.PathValue("id"), u.Sub, u.OrgID, u.Role == auth.RoleOps)
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -130,7 +138,7 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) ship(w http.ResponseWriter, r *http.Request) {
 	u, _ := auth.UserFrom(r.Context())
-	o, err := s.orders.Ship(r.Context(), r.PathValue("id"), u.Sub, u.Role == auth.RoleOps)
+	o, err := s.orders.Ship(r.Context(), r.PathValue("id"), u.Sub, u.OrgID, u.Role == auth.RoleOps)
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -185,7 +193,7 @@ func orderJSON(o order.Order) map[string]any {
 		})
 	}
 	return map[string]any{
-		"id": o.ID, "buyerSub": o.BuyerSub, "status": o.Status, "cancelReason": o.CancelReason,
+		"id": o.ID, "buyerSub": o.BuyerSub, "orgId": o.OrgID, "status": o.Status, "cancelReason": o.CancelReason,
 		"amountMinor": o.Amount.Minor, "currency": o.Amount.Currency,
 		"idempotencyKey": o.IdempotencyKey, "paymentId": o.PaymentID,
 		"lines":     lines,

@@ -52,12 +52,14 @@ func (s *Store) GetBySKU(_ context.Context, sku string) (catalog.Product, error)
 	return s.products[id], nil
 }
 
-func (s *Store) List(context.Context) ([]catalog.Product, error) {
+func (s *Store) List(_ context.Context, orgID string) ([]catalog.Product, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	out := make([]catalog.Product, 0, len(s.products))
 	for _, p := range s.products {
-		out = append(out, p)
+		if p.OrgID == orgID {
+			out = append(out, p)
+		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].SKU < out[j].SKU })
 	return out, nil

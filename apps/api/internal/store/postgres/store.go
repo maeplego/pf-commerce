@@ -63,13 +63,13 @@ func splitSQL(raw string) []string {
 	return out
 }
 
-func (s *Store) Get(ctx context.Context, buyerSub string) (cart.Cart, error) {
-	rows, err := s.pool.Query(ctx, `SELECT product_id, qty, updated_at FROM cart_items WHERE buyer_sub=$1`, buyerSub)
+func (s *Store) Get(ctx context.Context, buyerSub, orgID string) (cart.Cart, error) {
+	rows, err := s.pool.Query(ctx, `SELECT product_id, qty, updated_at FROM cart_items WHERE buyer_sub=$1 AND org_id=$2`, buyerSub, orgID)
 	if err != nil {
 		return cart.Cart{}, err
 	}
 	defer rows.Close()
-	c := cart.Cart{BuyerSub: buyerSub, Items: []cart.Item{}}
+	c := cart.Cart{BuyerSub: buyerSub, OrgID: orgID, Items: []cart.Item{}}
 	for rows.Next() {
 		var it cart.Item
 		if err := rows.Scan(&it.ProductID, &it.Qty, &it.UpdatedAt); err != nil {
@@ -86,19 +86,19 @@ func (s *Store) Replace(ctx context.Context, c cart.Cart) error {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, `DELETE FROM cart_items WHERE buyer_sub=$1`, c.BuyerSub); err != nil {
+	if _, err := tx.Exec(ctx, `DELETE FROM cart_items WHERE buyer_sub=$1 AND org_id=$2`, c.BuyerSub, c.OrgID); err != nil {
 		return err
 	}
 	for _, it := range c.Items {
-		if _, err := tx.Exec(ctx, `INSERT INTO cart_items (buyer_sub, product_id, qty, updated_at) VALUES ($1,$2,$3,$4)`,
-			c.BuyerSub, it.ProductID, it.Qty, it.UpdatedAt); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO cart_items (buyer_sub, org_id, product_id, qty, updated_at) VALUES ($1,$2,$3,$4,$5)`,
+			c.BuyerSub, c.OrgID, it.ProductID, it.Qty, it.UpdatedAt); err != nil {
 			return err
 		}
 	}
 	return tx.Commit(ctx)
 }
 
-func (s *Store) Clear(ctx context.Context, buyerSub string) error {
-	_, err := s.pool.Exec(ctx, `DELETE FROM cart_items WHERE buyer_sub=$1`, buyerSub)
+func (s *Store) Clear(ctx context.Context, buyerSub, orgID string) error {
+	_, err := s.pool.Exec(ctx, `DELETE FROM cart_items WHERE buyer_sub=$1 AND org_id=$2`, buyerSub, orgID)
 	return err
 }

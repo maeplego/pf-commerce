@@ -28,7 +28,7 @@ type EventHelper struct {
 func TestGivenWhenThenCreateThenPayThenShip(t *testing.T) {
 	now := time.Date(2026, 8, 19, 6, 0, 0, 0, time.UTC)
 	h := EventHelper{T: t, stream: id.New(), at: now}
-	in := order.CheckoutInput{BuyerSub: "alice", IdempotencyKey: "k1"}
+	in := order.CheckoutInput{BuyerSub: "alice", OrgID: "org-demo-a", IdempotencyKey: "k1"}
 	lines := []order.Line{{ProductID: "p1", SKU: "MUG-1", Name: "Mug", Qty: 1, UnitPriceMinor: 1200, Currency: "JPY"}}
 	created, err := order.DecideCreate(order.Order{}, in, lines, 1200, "JPY", now)
 	if err != nil {
@@ -76,7 +76,7 @@ func TestCheckoutWritesTimelineEvents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	evs, err := w.orders.Events(w.ctx, o.ID, "alice", false)
+	evs, err := w.orders.Events(w.ctx, o.ID, "alice", "org-demo-a", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestCheckoutWritesTimelineEvents(t *testing.T) {
 	if err := w.orders.Rebuild(w.ctx); err != nil {
 		t.Fatal(err)
 	}
-	again, err := w.orders.Get(w.ctx, o.ID, "alice", false)
+	again, err := w.orders.Get(w.ctx, o.ID, "alice", "org-demo-a", false)
 	if err != nil || again.Status != order.StatusPaid {
 		t.Fatalf("%+v %v", again, err)
 	}
@@ -108,7 +108,7 @@ func TestShipAfterPaid(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	shipped, err := w.orders.Ship(w.ctx, o.ID, "alice", false)
+	shipped, err := w.orders.Ship(w.ctx, o.ID, "alice", "org-demo-a", false)
 	if err != nil || shipped.Status != order.StatusShipped {
 		t.Fatalf("%+v %v", shipped, err)
 	}

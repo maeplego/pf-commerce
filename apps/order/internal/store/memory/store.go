@@ -50,7 +50,7 @@ func (s *Store) Append(_ context.Context, streamID string, expectedVersion int, 
 			var d order.OrderCreatedData
 			if err := json.Unmarshal(raw, &d); err == nil {
 				for _, existing := range s.orders {
-					if existing.BuyerSub == d.BuyerSub && existing.IdempotencyKey == d.IdempotencyKey {
+					if existing.BuyerSub == d.BuyerSub && existing.OrgID == d.OrgID && existing.IdempotencyKey == d.IdempotencyKey {
 						return order.ErrConflict
 					}
 				}
@@ -120,7 +120,7 @@ func (s *Store) Create(_ context.Context, o order.Order) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, existing := range s.orders {
-		if existing.BuyerSub == o.BuyerSub && existing.IdempotencyKey == o.IdempotencyKey {
+		if existing.BuyerSub == o.BuyerSub && existing.OrgID == o.OrgID && existing.IdempotencyKey == o.IdempotencyKey {
 			return order.ErrConflict
 		}
 	}
@@ -138,23 +138,23 @@ func (s *Store) Get(_ context.Context, id string) (order.Order, error) {
 	return cloneOrder(o), nil
 }
 
-func (s *Store) GetByIdempotency(_ context.Context, buyerSub, key string) (order.Order, error) {
+func (s *Store) GetByIdempotency(_ context.Context, buyerSub, orgID, key string) (order.Order, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, o := range s.orders {
-		if o.BuyerSub == buyerSub && o.IdempotencyKey == key {
+		if o.BuyerSub == buyerSub && o.OrgID == orgID && o.IdempotencyKey == key {
 			return cloneOrder(o), nil
 		}
 	}
 	return order.Order{}, order.ErrNotFound
 }
 
-func (s *Store) ListByBuyer(_ context.Context, buyerSub string) ([]order.Order, error) {
+func (s *Store) ListByBuyer(_ context.Context, buyerSub, orgID string) ([]order.Order, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var out []order.Order
 	for _, o := range s.orders {
-		if o.BuyerSub == buyerSub {
+		if o.BuyerSub == buyerSub && (orgID == "" || o.OrgID == orgID) {
 			out = append(out, cloneOrder(o))
 		}
 	}

@@ -44,6 +44,7 @@ type Line struct {
 type Order struct {
 	ID             string
 	BuyerSub       string
+	OrgID          string
 	Status         Status
 	CancelReason   string
 	Amount         money.Amount
@@ -57,14 +58,15 @@ type Order struct {
 type Repository interface {
 	Create(ctx context.Context, o Order) error
 	Get(ctx context.Context, id string) (Order, error)
-	GetByIdempotency(ctx context.Context, buyerSub, key string) (Order, error)
-	ListByBuyer(ctx context.Context, buyerSub string) ([]Order, error)
+	GetByIdempotency(ctx context.Context, buyerSub, orgID, key string) (Order, error)
+	ListByBuyer(ctx context.Context, buyerSub, orgID string) ([]Order, error)
 	ListAll(ctx context.Context) ([]Order, error)
 	Update(ctx context.Context, o Order) error
 }
 
 type CheckoutInput struct {
 	BuyerSub       string
+	OrgID          string
 	IdempotencyKey string
 	SiteID         string
 	Lines          []CheckoutLine
@@ -149,26 +151,31 @@ func (s *Service) PublishDue(ctx context.Context) error {
 	return s.store.MarkPublished(ctx, done, s.now())
 }
 
-func (s *Service) Get(ctx context.Context, orderID, actorSub string, ops bool) (Order, error) {
+func (s *Service) Get(ctx context.Context, orderID, actorSub, actorOrg string, ops bool) (Order, error) {
 	o, err := s.store.Get(ctx, orderID)
 	if err != nil {
 		return Order{}, err
 	}
-	if !ops && o.BuyerSub != actorSub {
-		return Order{}, ErrForbidden
+	if !ops {
+		if o.BuyerSub != actorSub {
+			return Order{}, ErrForbidden
+		}
+		if actorOrg != "" && o.OrgID != "" && o.OrgID != actorOrg {
+			return Order{}, ErrForbidden
+		}
 	}
 	return o, nil
 }
 
-func (s *Service) ListMine(ctx context.Context, buyerSub string) ([]Order, error) {
+func (s *Service) ListMine(ctx context.Context, buyerSub, orgID string) ([]Order, error) {
 	if buyerSub == "" {
 		return nil, ErrInvalid
 	}
-	return s.store.ListByBuyer(ctx, buyerSub)
+	return s.store.ListByBuyer(ctx, buyerSub, orgID)
 }
 
-func (s *Service) Events(ctx context.Context, orderID, actorSub string, ops bool) ([]RecordedEvent, error) {
-	if _, err := s.Get(ctx, orderID, actorSub, ops); err != nil {
+func (s *Service) Events(ctx context.Context, orderID, actorSub, actorOrg string, ops bool) ([]RecordedEvent, error) {
+	if _, err := s.Get(ctx, orderID, actorSub, actorOrg, ops); err != nil {
 		return nil, err
 	}
 	return s.store.Load(ctx, orderID)
@@ -178,8 +185,8 @@ func (s *Service) Rebuild(ctx context.Context) error {
 	return s.store.RebuildProjections(ctx)
 }
 
-func (s *Service) Ship(ctx context.Context, orderID, actorSub string, ops bool) (Order, error) {
-	o, err := s.Get(ctx, orderID, actorSub, ops)
+func (s *Service) Ship(ctx context.Context, orderID, actorSub, actorOrg string, ops bool) (Order, error) {
+	o, err := s.Get(ctx, orderID, actorSub, actorOrg, ops)
 	if err != nil {
 		return Order{}, err
 	}
@@ -204,10 +211,10 @@ func (s *Service) Checkout(ctx context.Context, in CheckoutInput) (Order, bool, 
 }
 
 func (s *Service) checkout(ctx context.Context, in CheckoutInput) (Order, bool, error) {
-	if in.BuyerSub == "" || in.IdempotencyKey == "" || in.SiteID == "" {
+	if in.BuyerSub == "" || in.IdempotencyKey == "" || in.SiteID == "" || in.OrgID == "" {
 		return Order{}, false, ErrInvalid
 	}
-	if existing, err := s.store.GetByIdempotency(ctx, in.BuyerSub, in.IdempotencyKey); err == nil {
+	if existing, err := s.store.GetByIdempotency(ctx, in.BuyerSub, in.OrgID, in.IdempotencyKey); err == nil {
 		return existing, false, nil
 	} else if err != ErrNotFound {
 		return Order{}, false, err
@@ -226,7 +233,7 @@ func (s *Service) checkout(ctx context.Context, in CheckoutInput) (Order, bool, 
 	}
 	if err := s.store.Append(ctx, orderID, 0, created); err != nil {
 		if errors.Is(err, ErrConflict) {
-			existing, gerr := s.store.GetByIdempotency(ctx, in.BuyerSub, in.IdempotencyKey)
+			existing, gerr := s.store.GetByIdempotency(ctx, in.BuyerSub, in.OrgID, in.IdempotencyKey)
 			return existing, false, gerr
 		}
 		return Order{}, false, err

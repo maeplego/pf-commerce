@@ -35,7 +35,7 @@ export function yen(minor: number) {
 }
 
 export async function listProducts(): Promise<Product[]> {
-  const res = await fetch(`${apiBase}/v1/products`, { cache: "no-store" });
+  const res = await fetch(`/api/commerce/v1/products`, { cache: "no-store", credentials: "same-origin" });
   if (!res.ok) throw new Error("products failed");
   const body = await res.json();
   return body.products as Product[];
