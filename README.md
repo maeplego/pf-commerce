@@ -42,7 +42,9 @@ BFF の GraphQL はストアフロント origin（既定 `http://localhost:3009`
 
 `/demo` で左右の「MUG-1 を 1点買う」をほぼ同時に押すと、片方だけ成功し、もう片方は在庫不足になります。
 
-推薦 API が落ちているときは、BFF はカタログ順に戻します（fail-closed）。
+## 推薦（P07）障害時
+
+単体 Compose には P07 を含めません。`RECOMMEND_API_URL` が空、または推薦 API が落ちている／タイムアウトしたときは、BFF の `recommended` / `similar` は **fail-closed** でカタログ順（`source: popularity`）に戻します。ストアフロントはそのフォールバックをそのまま表示します。gateway の購入イベント POST も URL 未設定なら送らず、チェックアウト自体は成功します。
 
 ## テスト
 
@@ -66,7 +68,7 @@ Compose 起動後のヘルス:
 node scripts/compose-smoke.mjs http://localhost:8099/health http://localhost:8110/health
 ```
 
-設計の詳細は [portfolio-plan](https://github.com/maeplego/portfolio-plan) の `portfolio-plan/commerce-platform/docs/` です。
+設計の詳細は [portfolio-plan](https://github.com/maeplego/portfolio-plan) の `portfolio-plan/commerce-platform/docs/` です。実装前の読み順は [AGENTS.md](./AGENTS.md)（`project/commerce-platform/AGENTS.md` へ誘導）です。
 
 ## ライセンスと利用条件
 

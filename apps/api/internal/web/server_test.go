@@ -400,3 +400,44 @@ func TestOpsStockGridAndNotifyAfterPaid(t *testing.T) {
 		t.Fatalf("%+v", notes)
 	}
 }
+
+func TestOpsExportOrdersProxy(t *testing.T) {
+	ts := testServer(t)
+	pid := mugID(t, ts)
+	pay := doJSON(t, http.MethodPost, ts.URL+"/v1/checkout", map[string]any{
+		"idempotencyKey": id.New(),
+		"lines":          []map[string]any{{"productId": pid, "qty": 1}},
+	}, "alice", "buyer")
+	if pay.StatusCode != http.StatusCreated {
+		b, _ := io.ReadAll(pay.Body)
+		t.Fatalf("pay %d %s", pay.StatusCode, b)
+	}
+	_ = pay.Body.Close()
+
+	forbidden := doJSON(t, http.MethodGet, ts.URL+"/v1/ops/exports/orders?date=2026-08-19", nil, "alice", "buyer")
+	defer forbidden.Body.Close()
+	if forbidden.StatusCode != http.StatusForbidden {
+		t.Fatalf("buyer export %d", forbidden.StatusCode)
+	}
+
+	res := doJSON(t, http.MethodGet, ts.URL+"/v1/ops/exports/orders?date=2026-08-19", nil, "ops-1", "ops")
+	if res.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(res.Body)
+		t.Fatalf("export %d %s", res.StatusCode, b)
+	}
+	var body struct {
+		Date  string `json:"date"`
+		Lines []any  `json:"lines"`
+		PII   string `json:"pii"`
+	}
+	decode(t, res, &body)
+	if body.Date != "2026-08-19" {
+		t.Fatalf("date %+v", body)
+	}
+	if len(body.Lines) == 0 {
+		t.Fatalf("expected export lines, got %+v", body)
+	}
+	if body.PII == "" {
+		t.Fatalf("missing pii marker: %+v", body)
+	}
+}

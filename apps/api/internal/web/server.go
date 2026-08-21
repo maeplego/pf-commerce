@@ -53,6 +53,7 @@ func (s *Server) Routes() http.Handler {
 	mux.Handle("POST /v1/ops/stock-inbound", s.auth.Handler(http.HandlerFunc(s.opsInbound)))
 	mux.Handle("GET /v1/ops/stock", s.auth.Handler(http.HandlerFunc(s.opsStock)))
 	mux.Handle("GET /v1/ops/notifications", s.auth.Handler(http.HandlerFunc(s.opsNotifications)))
+	mux.Handle("GET /v1/ops/exports/orders", s.auth.Handler(http.HandlerFunc(s.opsExportOrders)))
 	mux.HandleFunc("GET /v1/ops/stock/stream", s.opsStockStream)
 	return httpjson.CORS(s.cors, mux)
 }
@@ -283,7 +284,11 @@ func (s *Server) checkout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) proxyOrderGET(w http.ResponseWriter, r *http.Request) {
-	out, st, err := s.be.GetOrders(r.Context(), r.URL.Path, forwardAuth(r))
+	path := r.URL.Path
+	if q := r.URL.RawQuery; q != "" {
+		path += "?" + q
+	}
+	out, st, err := s.be.GetOrders(r.Context(), path, forwardAuth(r))
 	if err != nil {
 		httpjson.WriteError(w, http.StatusBadGateway, "upstream", err.Error())
 		return
@@ -291,6 +296,15 @@ func (s *Server) proxyOrderGET(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(st)
 	_, _ = w.Write(out)
+}
+
+func (s *Server) opsExportOrders(w http.ResponseWriter, r *http.Request) {
+	u, _ := auth.UserFrom(r.Context())
+	if u.Role != auth.RoleOps {
+		httpjson.WriteError(w, http.StatusForbidden, "forbidden", "ops role required")
+		return
+	}
+	s.proxyOrderGET(w, r)
 }
 
 func (s *Server) proxyOrderPOST(w http.ResponseWriter, r *http.Request) {
