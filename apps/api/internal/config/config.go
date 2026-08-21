@@ -4,9 +4,12 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/portfolio/pf-commerce/packages/envprofile"
 )
 
 type Config struct {
+	Env              string
 	HTTPAddr         string
 	DevAuth          bool
 	OidcIssuer       string
@@ -28,7 +31,9 @@ func FromEnv() (Config, error) {
 	}
 	devAuth := strings.EqualFold(os.Getenv("COMMERCE_DEV_AUTH"), "true") || os.Getenv("COMMERCE_DEV_AUTH") == "1"
 	issuer := strings.TrimSpace(os.Getenv("OIDC_ISSUER"))
+	env := envprofile.Normalize(os.Getenv("COMMERCE_ENV"))
 	cfg := Config{
+		Env:              env,
 		HTTPAddr:         ":" + port,
 		DevAuth:          devAuth,
 		OidcIssuer:       issuer,
@@ -50,6 +55,9 @@ func FromEnv() (Config, error) {
 	}
 	if !cfg.DevAuth && cfg.OidcIssuer == "" {
 		return cfg, fmt.Errorf("set COMMERCE_DEV_AUTH=true or configure OIDC_ISSUER")
+	}
+	if err := envprofile.ValidateCommercial(cfg.Env, cfg.DevAuth, cfg.OidcIssuer, "COMMERCE_ENV", "COMMERCE_DEV_AUTH"); err != nil {
+		return cfg, err
 	}
 	if cfg.CatalogURL == "" || cfg.InventoryURL == "" || cfg.OrderURL == "" {
 		return cfg, fmt.Errorf("COMMERCE_CATALOG_URL, COMMERCE_INVENTORY_URL, COMMERCE_ORDER_URL are required")

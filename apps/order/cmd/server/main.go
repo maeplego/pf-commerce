@@ -19,6 +19,7 @@ import (
 	"github.com/portfolio/pf-commerce/apps/order/internal/web"
 	"github.com/portfolio/pf-commerce/packages/auth"
 	"github.com/portfolio/pf-commerce/packages/clock"
+	"github.com/portfolio/pf-commerce/packages/envprofile"
 )
 
 func main() {
@@ -42,6 +43,10 @@ func main() {
 	}
 	if !devAuth && issuer == "" {
 		log.Fatal("set COMMERCE_DEV_AUTH=true or configure OIDC_ISSUER")
+	}
+	env := envprofile.Normalize(os.Getenv("COMMERCE_ENV"))
+	if err := envprofile.ValidateCommercial(env, devAuth, issuer, "COMMERCE_ENV", "COMMERCE_DEV_AUTH"); err != nil {
+		log.Fatal(err)
 	}
 
 	ctx := context.Background()
